@@ -2,7 +2,7 @@
 
 > This repo is the **master**. Nothing here is copied into a target repo — the script creates only the three per-feature docs inside `<your-repo>/docs/<feature-slug>/`, with the feature name and today's date pre-filled.
 
-Below, `<clone-path>` = wherever you cloned this repo (e.g. `~/tools/feature-init` or `~/Documents/linkzly-projects/process-templates`).
+Below, `<clone-path>` = wherever you cloned this repo (e.g. `~/tools/feature-init`).
 
 ## One-time setup
 
