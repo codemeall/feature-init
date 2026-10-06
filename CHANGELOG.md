@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-06 — published to npm as `feature-docs`
+
+- `npx feature-docs@latest <agent...> [--project <repo>] [--force]` runs the bundled `install.sh`; `--force` updates an existing install.
+- `npx skills add codemeall/feature-init --skill feature-docs` keeps working from GitHub.
+
 ## 2026-10-06 — feature docs replace the 3-doc lifecycle
 
 The skill is renamed from `feature-init` to `feature-docs`, and it now records a feature after it is built instead of driving it from idea to release. Planning is left to the tools that already do it (`grill-with-docs`, `to-spec`, `to-tickets`, agent-fleet); this skill writes the tracked record those tools do not produce, because their specs and tickets stay in the untracked `.scratch/` folder.

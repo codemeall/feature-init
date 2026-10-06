@@ -111,6 +111,14 @@ npx skills add codemeall/feature-init --skill feature-docs      # the current pr
 npx skills add codemeall/feature-init --skill feature-docs -g -a claude-code -a codex -a cursor
 ```
 
+Or from npm, which runs the bundled installer (same arguments as `install.sh` below):
+
+```bash
+npx feature-docs@latest all                              # every supported agent, globally
+npx feature-docs@latest claude --project .               # into the current repo
+npx feature-docs@latest all --force                      # update an existing install
+```
+
 Or from a clone, with no Node:
 
 ```bash
