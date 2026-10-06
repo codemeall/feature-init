@@ -1,0 +1,33 @@
+---
+description: >-
+  Feature docs for this repo. Apply when a feature has just been implemented and needs a
+  tracked record, when converting existing docs into feature docs, when a spec or ticket under
+  .scratch/ changed, or when working with files under docs/*/feature-docs/.
+alwaysApply: false
+---
+
+# feature-docs (Cursor adapter)
+
+Note: current Cursor versions support the SKILL.md standard natively. Prefer
+`./install.sh cursor` (installs to `~/.cursor/skills/`). Use this rule file only on older
+Cursor versions, or as a repo-level nudge.
+
+Copy this file into the target repo at `.cursor/rules/feature-docs.mdc` and replace
+`<clone-path>` with where you cloned feature-init (for example `~/tools/feature-init`).
+
+Full instructions, read and follow:
+`<clone-path>/skills/feature-docs/SKILL.md`
+(clone from https://github.com/codemeall/feature-init if missing)
+
+Core rules:
+- Specs and tickets live in `.scratch/<feature>/` (local, untracked). The tracked record of a
+  built feature is `docs/<feature>/feature-docs/`: overview.md, decisions.md, tickets.md,
+  sources.json.
+- Before speccing or changing a feature, read its decisions.md and cite the decision IDs the
+  change builds on or overturns.
+- After implementation, write the feature docs from the spec, the tickets and the code. Every
+  "What was built" row cites a real file; work the code does not show is "Not built yet".
+- When `.scratch/<feature>/` changes, run
+  `bash <clone-path>/skills/feature-docs/scripts/feature-docs.sh status .` and update the rows
+  for the files it names, then `stamp`.
+- Superseded decisions and withdrawn tickets keep their rows.
