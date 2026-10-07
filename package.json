@@ -1,6 +1,6 @@
 {
   "name": "feature-docs",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Agent skill that writes tracked, as-built feature docs (overview, decisions, tickets) next to the code for Claude Code, Cursor, Codex and Antigravity.",
   "keywords": ["agent-skill", "skills", "claude-code", "cursor", "codex", "antigravity", "documentation", "SKILL.md"],
   "homepage": "https://github.com/codemeall/feature-init#readme",

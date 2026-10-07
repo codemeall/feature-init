@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-10-07 — 1.0.1: sources from a Fleet run
+
+- WRITE names a Fleet run's worker reports and evidence files as inputs for the Testing section and the delivery dates, and dates a Fleet-delivered ticket from `verified_at` in `fleet resume <run> --json`. They are writing inputs, not tracked sources: `stamp` still hashes only `.scratch/<feature>`.
+- USAGE notes that a Fleet lead runs `status` on a documented feature before its closing report.
+
 ## 2026-10-06 — published to npm as `feature-docs`
 
 - `npx feature-docs@latest <agent...> [--project <repo>] [--force]` runs the bundled `install.sh`; `--force` updates an existing install.

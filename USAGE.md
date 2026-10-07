@@ -184,7 +184,7 @@ Fleet implements approved tickets and leaves commits to you. Feature docs fit be
 
 1. `grill-with-docs` → `to-spec` → `to-tickets` write `.scratch/<feature>/`.
 2. Fleet plans, launches and verifies the tickets.
-3. Ask the lead to write the feature docs, or to sync them when the feature already has some. The run's `notes.md` and plan decisions are sources for `decisions.md`.
+3. Ask the lead to write the feature docs, or to sync them when the feature already has some. The run's `notes.md` and plan decisions are sources for `decisions.md`; its reports and evidence files feed the Testing section and date each delivered ticket (`verified_at` in `fleet resume <run> --json`). A lead with this skill installed runs `status` on a documented feature before its closing report and lists what is out of step.
 4. Review and commit the code and the feature docs together.
 
 ## With a glossary and ADRs

@@ -35,12 +35,12 @@ When the repo has no `docs/FEATURES.md`, finish the first WRITE or CONVERT by of
 
 ## WRITE — after implementation
 
-1. Find the sources: `.scratch/<feature>/spec.md`, every file in `.scratch/<feature>/issues/`, and the decisions made while building (for a Fleet run, `.fleet/runs/<run>/notes.md` and the plan's `decisions`).
+1. Find the sources: `.scratch/<feature>/spec.md`, every file in `.scratch/<feature>/issues/`, and the decisions made while building. For a Fleet run, `.fleet/runs/<run>/` holds `notes.md` and the plan's `decisions`, plus the worker reports and the lead's evidence files, which feed the Testing section and the delivery dates. Those are inputs for writing, not tracked sources: `stamp` hashes only `.scratch/<feature>`.
 2. Run `bash scripts/feature-docs.sh new <repo> <feature>`.
 3. Read every source end to end, then open the code behind each ticket. This step is done when every ticket has a file that proves it or is headed for "Not built yet".
 4. Fill `overview.md`, starting with the one-sentence `Summary:`. Condense the spec's user stories into the "What was built" rows, one per capability, each citing a file you opened. Write paths from the repo root, including the package or submodule folder (`apps/web/src/export.ts`). The spec leaves paths out because they go stale before the code exists; here they are the evidence, and `status` checks them.
 5. Fill `decisions.md`: one row for every item in the spec's Implementation Decisions and Testing Decisions, every decision made during the build, and every place the code departs from the spec (source `as-built`).
-6. Fill `tickets.md`: one row and one criteria block per issue file. `delivered` only where the code shows it. The date is when it was delivered, from the ticket, the decision record or the commit.
+6. Fill `tickets.md`: one row and one criteria block per issue file. `delivered` only where the code shows it. The date is when it was delivered: from the ticket, the decision record or the commit, or for a Fleet run the day the lead accepted it (`verified_at` in `fleet resume <run> --json`; the evidence file's date on older runs).
 7. Run `bash scripts/feature-docs.sh stamp <repo> <feature>`, then report the files written, everything under "Not built yet", and any glossary or ADR candidates. The user commits the folder with the code.
 
 ## SYNC — the docs are out of step
