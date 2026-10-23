@@ -73,6 +73,11 @@ for name in SKILL.md assets/templates/overview.md assets/templates/decisions.md 
   [[ -f "$SKILL/$name" ]] || fail "missing resource: $name"
 done
 pass "shell entrypoints parse and portable skill resources exist"
+description="$(sed -n '3,/^---$/p' "$SKILL/SKILL.md" | sed '1d;$d' | tr -d '\n' | sed 's/description: *>//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+description_length="${#description}"
+[[ "$description_length" -le 1024 ]] || fail "SKILL.md description is $description_length chars, exceeds 1024 char limit"
+contains "$description" "Use when"
+pass "SKILL.md description is under 1024 chars and contains 'Use when' clause"
 for doc in README.md USAGE.md CHANGELOG.md; do
   while IFS= read -r link; do [[ -z "$link" || -e "$ROOT/$link" ]] || fail "$doc links to $link"; done < <(grep -oE '\]\(\./[^)#]*' "$doc" | sed 's/^](//' | sort -u || true)
 done
