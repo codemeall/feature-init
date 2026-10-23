@@ -279,6 +279,25 @@ done
 cp "$TMP/legacy-safe-upgrade" "$legacy_manifest"
 pass "legacy dot and slash spellings preserve drift detection and safely upgrade with or without local sources"
 
+# Issue #3: Reformatted manifest should exit 2 with clear error
+REFORMATTED="$TMP/reformatted"
+make_repo "$REFORMATTED"
+reformatted_docs="$REFORMATTED/docs/csv-export/feature-docs"
+run 0 stamp "$REFORMATTED" >/dev/null
+reformatted_manifest="$reformatted_docs/sources.json"
+cp "$reformatted_manifest" "$TMP/manifest.valid"
+# Test compact JSON (jq -c)
+cat "$TMP/manifest.valid" | tr -d '\n' | sed 's/  */ /g' > "$reformatted_manifest"
+out="$(run 2 bash "$FD" status "$REFORMATTED" csv-export 2>&1)" || true
+contains "$out" "sources.json is not in the script-owned layout"
+cmp "$reformatted_manifest" <(cat "$TMP/manifest.valid" | tr -d '\n' | sed 's/  */ /g') || fail "reformatted manifest check changed the file"
+# Test reindented JSON (different spacing)
+sed 's/^  /    /' "$TMP/manifest.valid" > "$reformatted_manifest"
+out="$(run 2 bash "$FD" stamp "$REFORMATTED" csv-export 2>&1)" || true
+contains "$out" "sources.json is not in the script-owned layout"
+cp "$TMP/manifest.valid" "$reformatted_manifest"
+pass "reformatted manifest exits 2 with clear error and does not change files"
+
 # The same relative key in three maps must keep three separate meanings.
 SCOPED="$TMP/scoped"
 make_repo "$SCOPED"
