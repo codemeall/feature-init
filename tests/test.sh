@@ -79,7 +79,7 @@ description_length="${#description}"
 contains "$description" "Use when"
 contains "$description" "write the feature docs"
 contains "$description" "sync the feature docs"
-[[ "$description" =~ ^[A-Z][a-z]+s ]] || fail "SKILL.md description should start with a third-person verb (e.g. 'Writes')"
+[[ "$description" =~ ^[A-Z][a-z]+s[[:space:][:punct:]] ]] || fail "SKILL.md description should start with a third-person verb ending in 's' followed by space or punctuation (e.g. 'Writes,')"
 pass "SKILL.md description is under 1024 chars, contains 'Use when' and trigger phrases, and starts with third-person verb"
 for doc in README.md USAGE.md CHANGELOG.md; do
   while IFS= read -r link; do [[ -z "$link" || -e "$ROOT/$link" ]] || fail "$doc links to $link"; done < <(grep -oE '\]\(\./[^)#]*' "$doc" | sed 's/^](//' | sort -u || true)
