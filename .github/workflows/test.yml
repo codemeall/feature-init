@@ -8,9 +8,55 @@ permissions:
   contents: read
 
 jobs:
-  feature-init:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Verify scripts, compatibility, and packaged assets
+        run: ./tests/test.sh
+      - name: Pack and smoke test npx entry point
+        run: |
+          npm pack
+          TEST_HOME=$(mktemp -d)
+          HOME="$TEST_HOME" npx ./feature-docs-*.tgz all
+          for agent in claude cursor codex antigravity; do
+            case "$agent" in
+              claude) dir="$TEST_HOME/.claude/skills/feature-docs" ;;
+              cursor) dir="$TEST_HOME/.cursor/skills/feature-docs" ;;
+              codex) dir="$TEST_HOME/.codex/skills/feature-docs" ;;
+              antigravity) dir="$TEST_HOME/.gemini/config/skills/feature-docs" ;;
+            esac
+            test -d "$dir" || { echo "Missing $agent install at $dir"; exit 1; }
+            "$dir/scripts/feature-docs.sh" --help >/dev/null || { echo "$agent script failed"; exit 1; }
+          done
+          echo "npx smoke test passed for all agents"
+      - name: Run shellcheck
+        run: |
+          if command -v shellcheck >/dev/null 2>&1; then
+            shellcheck -S warning install.sh skills/feature-docs/scripts/feature-docs.sh tests/test.sh
+          else
+            echo "shellcheck not available, skipping"
+          fi
+  
+  trigger-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify scripts, compatibility, and packaged assets
-        run: ./tests/test.sh
+      - name: Verify trigger phrases in SKILL.md description
+        run: |
+          description="$(sed -n '/^---$/,/^---$/p' skills/feature-docs/SKILL.md | sed -n '/^description:/,/^[a-z][a-z]*:/p' | sed '$d' | sed 's/^description:[[:space:]]*>-[[:space:]]*//' | sed 's/^[[:space:]]*//' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          echo "Description: $description"
+          for phrase in "write the feature docs" "sync the feature docs" "Use when"; do
+            if ! echo "$description" | grep -qF "$phrase"; then
+              echo "ERROR: Missing trigger phrase: $phrase"
+              exit 1
+            fi
+          done
+          echo "All trigger phrases present"

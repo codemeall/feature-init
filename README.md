@@ -184,12 +184,31 @@ skills/feature-docs/           the portable skill
   references/example.md        a filled set of feature docs, before and after a sync
   references/setup.md          the index, the pointer and the hooks
 adapters/                      AGENTS.md snippet and Cursor rule, for agents without skill support
+evals/                         trigger evaluation: should-trigger and should-not-trigger prompt sets
+  triggers.json                trigger test cases
+  run-trigger-eval.sh          lightweight static check for trigger phrase coverage
 install.sh                     installs the skill into Claude Code, Cursor, Codex or Antigravity
 tests/test.sh                  checks the script, the bundle and the installer
 USAGE.md                       commands, walk-throughs and questions
 ```
 
 The skill adds `docs/<feature>/feature-docs/` to your project, and `docs/FEATURES.md` plus one section in `CLAUDE.md` or `AGENTS.md` if you run the setup.
+
+## Testing
+
+Run the test suite:
+```bash
+./tests/test.sh
+```
+
+Run trigger evaluation to check skill description coverage:
+```bash
+./evals/run-trigger-eval.sh --report
+```
+
+## System requirements
+
+Requires bash, git, awk, and `shasum` or `sha256sum`. Node.js 18+ for the npx entry point. Windows requires WSL or Git Bash.
 
 ## License
 
