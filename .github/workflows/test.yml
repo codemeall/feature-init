@@ -49,17 +49,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify trigger phrases in SKILL.md description
+      - name: Verify quoted trigger phrases
         run: |
           description="$(sed -n '/^---$/,/^---$/p' skills/feature-docs/SKILL.md | sed -n '/^description:/,/^[a-z][a-z]*:/p' | sed '$d' | sed 's/^description:[[:space:]]*>-[[:space:]]*//' | sed 's/^[[:space:]]*//' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
           echo "Description: $description"
-          for phrase in "write the feature docs" "sync the feature docs" "Use when"; do
+          failed=0
+          if [[ "$description" != "Writes, converts, syncs and looks up"* ]]; then
+            echo "ERROR: description must open with 'Writes, converts, syncs and looks up'"
+            failed=1
+          fi
+          for phrase in \
+            "write the feature docs" \
+            "document this feature" \
+            "convert these docs" \
+            "sync the feature docs" \
+            "reconcile the feature docs" \
+            "update the feature documentation" \
+            "what did we decide about X"
+          do
             if ! echo "$description" | grep -qF "$phrase"; then
               echo "ERROR: Missing trigger phrase: $phrase"
-              exit 1
+              failed=1
             fi
           done
-          echo "All trigger phrases present"
-      - name: Run trigger evaluation
-        run: |
-          ./evals/run-trigger-eval.sh
+          if [[ "$failed" -ne 0 ]]; then
+            exit 1
+          fi
+          echo "All quoted trigger phrases present"
+      - name: Advisory IDF overlap smoke signal
+        run: ./evals/run-trigger-eval.sh --report

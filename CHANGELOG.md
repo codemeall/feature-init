@@ -9,6 +9,7 @@
 - Fix: `--force` now prints "replaced" message when overwriting existing install.
 - Fix: reformatted sources.json manifest now exits 2 with clear error message suggesting restore from git or delete and re-stamp.
 - Add: trigger evaluation with evals/triggers.json and evals/run-trigger-eval.sh for testing skill triggering.
+- Note: the trigger eval is advisory. It is a static smoke signal and cannot separate feature docs from ticket creation.
 - Add: CI matrix testing on ubuntu-latest and macos-latest with Node 20, 22, 24.
 - Fix: update engines to Node >=20 and document bash requirement.
 

@@ -193,9 +193,9 @@ skills/feature-docs/           the portable skill
   references/example.md        a filled set of feature docs, before and after a sync
   references/setup.md          the index, the pointer and the hooks
 adapters/                      AGENTS.md snippet and Cursor rule, for agents without skill support
-evals/                         trigger evaluation: should-trigger and should-not-trigger prompt sets
-  triggers.json                trigger test cases
-  run-trigger-eval.sh          lightweight static check for trigger phrase coverage
+evals/                         advisory trigger smoke check and prompt sets
+  triggers.json                should-trigger and should-not-trigger prompts
+  run-trigger-eval.sh          advisory IDF overlap smoke signal; cannot separate feature docs from ticket creation
 install.sh                     installs the skill into Claude Code, Cursor, Codex or Antigravity
 tests/test.sh                  checks the script, the bundle and the installer
 USAGE.md                       commands, walk-throughs and questions
@@ -210,7 +210,7 @@ Run the test suite:
 ./tests/test.sh
 ```
 
-Run trigger evaluation to check skill description coverage:
+The trigger overlap script is an advisory smoke signal. It prints coverage and max overlap, warns when its reference thresholds are missed, and exits 0. It cannot separate feature docs from ticket creation. CI blocks on the quoted trigger phrases instead.
 ```bash
 ./evals/run-trigger-eval.sh --report
 ```

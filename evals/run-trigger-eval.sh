@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Static description check for feature-docs skill trigger coverage
-# Scores each prompt by IDF-weighted coverage against the description and reports coverage and max overlap.
+# Advisory static smoke signal for feature-docs description overlap.
+# Scores each prompt by IDF-weighted coverage, prints coverage and max overlap, warns, and exits 0.
+# It cannot separate feature docs from ticket creation. The blocking check is the quoted phrases in CI.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -13,12 +14,16 @@ usage() {
   cat <<EOF
 Usage: $0 [--report]
 
-Static description check for the feature-docs skill. Scores each prompt in
-triggers.json by IDF-weighted overlap with the SKILL.md description. Inverse
-document frequency is computed over the 24 prompts in triggers.json, so a word
-that appears in many prompts counts less than a word that appears in few.
+Advisory static smoke signal for the feature-docs skill description. Scores
+each prompt in triggers.json by IDF-weighted overlap with the SKILL.md
+description, prints the report, and exits 0. Inverse document frequency is
+computed over the 24 prompts in triggers.json, so a word that appears in many
+prompts counts less than a word that appears in few.
 
-The gate requires:
+This cannot separate feature docs from ticket creation. Quoted trigger phrases
+are the blocking check, in the trigger-check CI job.
+
+Reference thresholds, reported but not enforced:
 - every should-trigger prompt scores at least 60
 - every near miss scores at most 55
 - the margin (worst should-trigger minus best near miss) is at least 12
@@ -30,9 +35,9 @@ Reported metrics:
   --report    Show the score for each prompt
   --help      Show this help
 
-This is a lightweight static check. For full evaluation, manually test skill
-loading in a harness: run 'claude -p <repo>' with and without the skill
-installed, comparing which prompts load feature-docs.
+For a real trigger evaluation, manually test skill loading in a harness:
+run 'claude -p <repo>' with and without the skill installed, comparing which
+prompts load feature-docs.
 EOF
 }
 
@@ -160,22 +165,24 @@ END {
   printf "Max overlap:  %.1f%% (best near-miss)\n", max_n
   print ""
 
-  failed = 0
+  warned = 0
   if (min_t < 60) {
-    printf "FAIL: worst should-trigger prompt scored %.1f%%, below 60%% threshold\n", min_t
-    failed = 1
+    printf "WARN: worst should-trigger prompt scored %.1f%%, below 60%% threshold\n", min_t
+    warned = 1
   }
   if (max_n > 55) {
-    printf "FAIL: best near-miss prompt scored %.1f%%, above 55%% threshold\n", max_n
-    failed = 1
+    printf "WARN: best near-miss prompt scored %.1f%%, above 55%% threshold\n", max_n
+    warned = 1
   }
   if (margin < 12) {
-    printf "FAIL: margin between worst should-trigger (%.1f%%) and best near-miss (%.1f%%) is %.1f%%, below 12 point minimum\n", min_t, max_n, margin
-    failed = 1
+    printf "WARN: margin between worst should-trigger (%.1f%%) and best near-miss (%.1f%%) is %.1f%%, below 12 point minimum\n", min_t, max_n, margin
+    warned = 1
   }
-  if (failed) exit 1
-
-  print "Static description check passed"
+  if (warned) {
+    print "WARN: advisory only. This static smoke signal cannot separate feature docs from ticket creation."
+  } else {
+    print "Advisory smoke signal: reference thresholds met. This check cannot separate feature docs from ticket creation."
+  }
   exit 0
 }
 
