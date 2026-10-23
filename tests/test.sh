@@ -430,4 +430,23 @@ out="$(run 0 bash "$ROOT/install.sh" claude --project "$INSTALL_PROJECT" --force
 contains "$out" 'replaced  claude:'
 pass "--force reports replaced message when overwriting existing install"
 
+# Issue #4: Uninstall functionality
+UNINSTALL_PROJECT="$TMP/uninstall-project"
+mkdir -p "$UNINSTALL_PROJECT"
+run 0 bash "$ROOT/install.sh" claude cursor --project "$UNINSTALL_PROJECT" >/dev/null
+[[ -d "$UNINSTALL_PROJECT/.claude/skills/feature-docs" ]] || fail "install did not create claude skill"
+[[ -d "$UNINSTALL_PROJECT/.cursor/skills/feature-docs" ]] || fail "install did not create cursor skill"
+out="$(run 0 bash "$ROOT/install.sh" --uninstall claude cursor --project "$UNINSTALL_PROJECT")"
+contains "$out" 'removed   claude:'
+contains "$out" 'removed   cursor:'
+[[ ! -e "$UNINSTALL_PROJECT/.claude/skills/feature-docs" ]] || fail "uninstall did not remove claude skill"
+[[ ! -e "$UNINSTALL_PROJECT/.cursor/skills/feature-docs" ]] || fail "uninstall did not remove cursor skill"
+out="$(run 0 bash "$ROOT/install.sh" --uninstall all --project "$UNINSTALL_PROJECT")"
+contains "$out" 'Nothing to uninstall'
+mkdir -p "$UNINSTALL_PROJECT/.claude/skills/feature-init"
+out="$(run 0 bash "$ROOT/install.sh" --uninstall claude --project "$UNINSTALL_PROJECT" --remove-legacy)"
+contains "$out" 'feature-init (legacy)'
+[[ ! -e "$UNINSTALL_PROJECT/.claude/skills/feature-init" ]] || fail "uninstall did not remove legacy skill"
+pass "uninstall removes feature-docs and optionally legacy feature-init"
+
 printf '1..%d\n' "$passes"

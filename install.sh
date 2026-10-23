@@ -7,26 +7,34 @@
 #   ./install.sh <agent...>                    # global install (all projects)
 #   ./install.sh <agent...> --project <repo>   # project install (checked into that repo)
 #   ./install.sh all [--project <repo>] [--force]
+#   ./install.sh --uninstall <agent...>        # remove feature-docs
+#   ./install.sh --uninstall all [--project <repo>] [--remove-legacy]
 #
 # Agents: claude | cursor | codex | antigravity | all
-#   --force  replace an existing install (e.g. to update to a newer version)
+#   --force          replace an existing install (e.g. to update to a newer version)
+#   --uninstall      remove the feature-docs skill
+#   --remove-legacy  also remove the old feature-init skill (use with --uninstall)
 set -euo pipefail
 
 SRC="$(cd "$(dirname "$0")/skills/feature-docs" && pwd)"
 SKILL_NAME="feature-docs"
 OLD_NAME="feature-init"   # the skill's name before 2026-10-06
 
-AGENTS=(); PROJECT=""; FORCE=0
+AGENTS=(); PROJECT=""; FORCE=0; UNINSTALL=0; REMOVE_LEGACY=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     claude|cursor|codex|antigravity) AGENTS+=("$1"); shift ;;
     all) AGENTS=(claude cursor codex antigravity); shift ;;
     --project) PROJECT="${2:-}"; [[ -d "$PROJECT" ]] || { echo "Error: project path not found: $PROJECT"; exit 1; }; shift 2 ;;
     --force) FORCE=1; shift ;;
-    *) echo "Unknown argument: $1"; echo "Usage: $0 <claude|cursor|codex|antigravity|all>... [--project <repo>] [--force]"; exit 1 ;;
+    --uninstall) UNINSTALL=1; shift ;;
+    --remove-legacy) REMOVE_LEGACY=1; shift ;;
+    *) echo "Unknown argument: $1"; echo "Usage: $0 <claude|cursor|codex|antigravity|all>... [--project <repo>] [--force|--uninstall] [--remove-legacy]"; exit 1 ;;
   esac
 done
-[[ ${#AGENTS[@]} -gt 0 ]] || { echo "Usage: $0 <claude|cursor|codex|antigravity|all>... [--project <repo>] [--force]"; exit 1; }
+[[ ${#AGENTS[@]} -gt 0 ]] || { echo "Usage: $0 <claude|cursor|codex|antigravity|all>... [--project <repo>] [--force|--uninstall] [--remove-legacy]"; exit 1; }
+[[ $UNINSTALL -eq 0 || $FORCE -eq 0 ]] || { echo "Error: --uninstall and --force cannot be combined"; exit 1; }
+[[ $REMOVE_LEGACY -eq 0 || $UNINSTALL -eq 1 ]] || { echo "Error: --remove-legacy requires --uninstall"; exit 1; }
 
 dest_for() { # $1 = agent; echoes the skills parent dir
   if [[ -n "$PROJECT" ]]; then
@@ -45,6 +53,30 @@ dest_for() { # $1 = agent; echoes the skills parent dir
     esac
   fi
 }
+
+if [[ $UNINSTALL -eq 1 ]]; then
+  removed_any=0
+  for agent in "${AGENTS[@]}"; do
+    DEST="$(dest_for "$agent")/$SKILL_NAME"
+    if [[ -e "$DEST" ]]; then
+      rm -rf "$DEST"
+      echo "removed   $agent: $DEST"
+      removed_any=1
+    fi
+    if [[ $REMOVE_LEGACY -eq 1 ]]; then
+      OLD="$(dest_for "$agent")/$OLD_NAME"
+      if [[ -e "$OLD" ]]; then
+        rm -rf "$OLD"
+        echo "removed   $agent: $OLD (legacy)"
+        removed_any=1
+      fi
+    fi
+  done
+  if [[ $removed_any -eq 0 ]]; then
+    echo "Nothing to uninstall: feature-docs is not installed for any of the specified agents."
+  fi
+  exit 0
+fi
 
 for agent in "${AGENTS[@]}"; do
   DEST="$(dest_for "$agent")/$SKILL_NAME"
