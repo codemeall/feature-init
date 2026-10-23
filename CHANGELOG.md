@@ -1,6 +1,15 @@
 # Changelog
 
-## 2026-10-23 — 2.0.0: evidence-backed feature records
+## Unreleased (planned 2.0.1)
+
+- Fix: incomplete docs with no `--evidence` now exit 2 (usage error) instead of 1, and both the structural findings and the evidence requirement are reported in the same run.
+- Fix: restore third-person SKILL.md description with trigger phrases for better skill discovery.
+- Add: `--uninstall` flag to remove feature-docs skill from specified agents.
+- Add: `--remove-legacy` flag to also remove old feature-init skill when uninstalling.
+- Fix: `--force` now prints "replaced" message when overwriting existing install.
+- Fix: reformatted sources.json manifest now exits 2 with clear error message suggesting restore from git or delete and re-stamp.
+
+## 2026-10-23, 2.0.0: evidence-backed feature records
 
 This is a major release because first stamps now require explicit evidence files, incomplete documents cannot be stamped, and legacy source-only records return `REVIEW REQUIRED` (exit 1) until reviewed. Existing manifests remain readable; see [Upgrading existing records](./USAGE.md#upgrading-existing-records) for migration.
 

@@ -1,8 +1,7 @@
 # Read only the canonical, script-owned v1/v2 manifest format. This is intentionally
 # not a general JSON parser: reject unfamiliar input instead of guessing a baseline.
 function fail(message) {
-  print "Error: sources.json is not in the script-owned layout: " message > "/dev/stderr"
-  print "restore it from git or re-stamp" > "/dev/stderr"
+  print "Error: sources.json is not in the script-owned layout (" message "); restore it from git, or delete sources.json and stamp again with --evidence <files>" > "/dev/stderr"
   failed = 1
   exit 2
 }

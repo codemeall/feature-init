@@ -287,14 +287,32 @@ run 0 stamp "$REFORMATTED" >/dev/null
 reformatted_manifest="$reformatted_docs/sources.json"
 cp "$reformatted_manifest" "$TMP/manifest.valid"
 # Test compact JSON (jq -c)
-cat "$TMP/manifest.valid" | tr -d '\n' | sed 's/  */ /g' > "$reformatted_manifest"
-out="$(run 2 bash "$FD" status "$REFORMATTED" csv-export 2>&1)" || true
+if command -v jq >/dev/null 2>&1; then
+  jq -c . "$TMP/manifest.valid" > "$reformatted_manifest"
+else
+  # Compact JSON without jq: remove newlines and collapse spaces
+  cat "$TMP/manifest.valid" | tr -d '\n' | sed 's/  */ /g' > "$reformatted_manifest"
+fi
+cp "$reformatted_manifest" "$TMP/compact.json"
+rc=0
+out="$(bash "$FD" status "$REFORMATTED" csv-export 2>&1)" || rc=$?
+[[ $rc -eq 2 ]] || fail "status on compact manifest exited $rc, expected 2"
 contains "$out" "sources.json is not in the script-owned layout"
-cmp "$reformatted_manifest" <(cat "$TMP/manifest.valid" | tr -d '\n' | sed 's/  */ /g') || fail "reformatted manifest check changed the file"
+contains "$out" "restore it from git, or delete sources.json and stamp again with --evidence"
+cmp "$reformatted_manifest" "$TMP/compact.json" || fail "reformatted manifest check changed the file"
 # Test reindented JSON (different spacing)
 sed 's/^  /    /' "$TMP/manifest.valid" > "$reformatted_manifest"
-out="$(run 2 bash "$FD" stamp "$REFORMATTED" csv-export 2>&1)" || true
+cp "$reformatted_manifest" "$TMP/reindented.json"
+rc=0
+out="$(bash "$FD" stamp "$REFORMATTED" csv-export 2>&1)" || rc=$?
+[[ $rc -eq 2 ]] || fail "stamp on reindented manifest exited $rc, expected 2"
 contains "$out" "sources.json is not in the script-owned layout"
+contains "$out" "restore it from git, or delete sources.json and stamp again with --evidence"
+cmp "$reformatted_manifest" "$TMP/reindented.json" || fail "stamp on reformatted manifest changed the file"
+# Test that deleting sources.json and stamping again succeeds
+rm "$reformatted_manifest"
+run 0 bash "$FD" stamp "$REFORMATTED" csv-export --evidence src/export.js --evidence tests/export.test.js >/dev/null
+[[ -f "$reformatted_manifest" ]] || fail "stamp after deleting sources.json did not create new manifest"
 cp "$TMP/manifest.valid" "$reformatted_manifest"
 pass "reformatted manifest exits 2 with clear error and does not change files"
 
@@ -448,5 +466,30 @@ out="$(run 0 bash "$ROOT/install.sh" --uninstall claude --project "$UNINSTALL_PR
 contains "$out" 'feature-init (legacy)'
 [[ ! -e "$UNINSTALL_PROJECT/.claude/skills/feature-init" ]] || fail "uninstall did not remove legacy skill"
 pass "uninstall removes feature-docs and optionally legacy feature-init"
+
+# Global-install uninstall test with temp HOME
+GLOBAL_HOME="$TMP/global-home"
+mkdir -p "$GLOBAL_HOME"
+HOME="$GLOBAL_HOME" run 0 bash "$ROOT/install.sh" all >/dev/null
+for agent in claude cursor codex antigravity; do
+  case "$agent" in
+    claude) dir="$GLOBAL_HOME/.claude/skills/feature-docs" ;;
+    cursor) dir="$GLOBAL_HOME/.cursor/skills/feature-docs" ;;
+    codex) dir="$GLOBAL_HOME/.codex/skills/feature-docs" ;;
+    antigravity) dir="$GLOBAL_HOME/.gemini/config/skills/feature-docs" ;;
+  esac
+  [[ -d "$dir" ]] || fail "global install did not create $agent at $dir"
+done
+HOME="$GLOBAL_HOME" run 0 bash "$ROOT/install.sh" --uninstall all >/dev/null
+for agent in claude cursor codex antigravity; do
+  case "$agent" in
+    claude) dir="$GLOBAL_HOME/.claude/skills/feature-docs" ;;
+    cursor) dir="$GLOBAL_HOME/.cursor/skills/feature-docs" ;;
+    codex) dir="$GLOBAL_HOME/.codex/skills/feature-docs" ;;
+    antigravity) dir="$GLOBAL_HOME/.gemini/config/skills/feature-docs" ;;
+  esac
+  [[ ! -e "$dir" ]] || fail "global uninstall did not remove $agent from $dir"
+done
+pass "global-install uninstall removes feature-docs from all targets"
 
 printf '1..%d\n' "$passes"
