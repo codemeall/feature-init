@@ -336,7 +336,7 @@ lacks "$source_map" 'docs/csv-export/feature-docs/'
 lacks "$source_map" 'docs/FEATURES.md'
 cp "$root_manifest" "$TMP/root-source.baseline"
 cp -R "$ROOT_SOURCE/.git/feature-docs" "$TMP/root-source.snapshot"
-for repeat in 1 2; do
+for _ in 1 2; do
   run 0 bash "$FD" stamp "$ROOT_SOURCE" csv-export >/dev/null
   run 0 bash "$FD" status "$ROOT_SOURCE" csv-export >/dev/null
   cmp "$root_manifest" "$TMP/root-source.baseline" || fail "repeated root-source stamp changed the baseline"
@@ -406,4 +406,9 @@ diff -r "$SKILL" "$installed" >/dev/null || fail "installed skill differs from s
 contains "$out" 'the older feature-init skill is still at'
 run 0 bash "$installed/scripts/feature-docs.sh" check "$CUSTOM" csv-export >/dev/null
 pass "isolated project install is complete and reports an older local skill"
+
+out="$(run 0 bash "$ROOT/install.sh" claude --project "$INSTALL_PROJECT" --force)"
+contains "$out" 'replaced  claude:'
+pass "--force reports replaced message when overwriting existing install"
+
 printf '1..%d\n' "$passes"

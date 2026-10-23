@@ -48,14 +48,21 @@ dest_for() { # $1 = agent; echoes the skills parent dir
 
 for agent in "${AGENTS[@]}"; do
   DEST="$(dest_for "$agent")/$SKILL_NAME"
+  replacing=0
   if [[ -e "$DEST" ]]; then
-    if [[ $FORCE -eq 1 ]]; then rm -rf "$DEST"
+    if [[ $FORCE -eq 1 ]]; then
+      rm -rf "$DEST"
+      replacing=1
     else echo "skip     $agent: $DEST already exists (use --force to replace)"; continue; fi
   fi
   mkdir -p "$(dirname "$DEST")"
   cp -R "$SRC" "$DEST"
   chmod +x "$DEST/scripts/feature-docs.sh" 2>/dev/null || true
-  echo "installed $agent -> $DEST"
+  if [[ $replacing -eq 1 ]]; then
+    echo "replaced  $agent: $DEST"
+  else
+    echo "installed $agent -> $DEST"
+  fi
   OLD="$(dest_for "$agent")/$OLD_NAME"
   if [[ -e "$OLD" ]]; then echo "note     $agent: the older $OLD_NAME skill is still at $OLD; remove it so the two do not both trigger"; fi
 done
