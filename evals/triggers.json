@@ -9,11 +9,13 @@
     "convert docs/user-auth into feature docs",
     "what did we decide about the delimiter",
     "what did we decide about X",
-    "look up the decisions for this feature"
+    "look up the decisions for this feature",
+    "reconcile the feature docs with the latest changes",
+    "update the feature documentation after these changes"
   ],
   "should_not_trigger": [
     "write a spec for csv-export",
-    "create tickets",
+    "create tickets for this feature",
     "update the README",
     "write unit tests",
     "add documentation to the code",

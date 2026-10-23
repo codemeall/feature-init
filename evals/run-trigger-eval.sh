@@ -106,26 +106,32 @@ echo "Should-trigger:     min=${min_trigger_score}%, avg=${avg_trigger}% (${#sho
 echo "Should-not-trigger: max=${max_non_trigger_score}%, avg=${avg_non_trigger}% (${#should_not_trigger[@]} prompts)"
 echo
 
-# Validation: worst should-trigger must score higher than best should-not-trigger
-if [[ $max_non_trigger_score -ge $min_trigger_score ]]; then
-  echo "FAIL: at least one should-not-trigger prompt scored >= worst should-trigger"
-  echo "  Worst should-trigger: ${min_trigger_score}%"
-  echo "  Best should-not-trigger: ${max_non_trigger_score}%"
+# Validation: every should-trigger prompt must score at least 60%
+threshold_trigger=60
+if [[ $min_trigger_score -lt $threshold_trigger ]]; then
+  echo "FAIL: worst should-trigger prompt scored ${min_trigger_score}%, below ${threshold_trigger}% threshold"
   exit 1
 fi
 
-# Validation: minimum threshold for should-trigger prompts
-threshold=20
-if [[ $min_trigger_score -lt $threshold ]]; then
-  echo "FAIL: worst should-trigger prompt scored ${min_trigger_score}%, below threshold ${threshold}%"
+# Validation: every should-not-trigger prompt must score at most 67%
+threshold_near_miss=67
+if [[ $max_non_trigger_score -gt $threshold_near_miss ]]; then
+  echo "FAIL: best near-miss prompt scored ${max_non_trigger_score}%, above ${threshold_near_miss}% threshold"
   exit 1
 fi
 
-recall="$(awk "BEGIN {printf \"%.1f\", ($avg_trigger / 100) * 100}")"
-precision="$(awk "BEGIN {if ($max_non_trigger_score == 0) print 100; else printf \"%.1f\", (1 - ($max_non_trigger_score / 100)) * 100}")"
+# Validation: worst should-trigger must beat best should-not-trigger by at least 14 points
+margin=$((min_trigger_score - max_non_trigger_score))
+if [[ $margin -lt 14 ]]; then
+  echo "FAIL: margin between worst should-trigger (${min_trigger_score}%) and best near-miss (${max_non_trigger_score}%) is ${margin}%, below 14% minimum"
+  exit 1
+fi
 
-echo "Recall:    ${recall}% (avg should-trigger coverage)"
-echo "Precision: ${precision}% (discriminates should-not-trigger)"
+coverage="$avg_trigger"
+max_overlap="$max_non_trigger_score"
+
+echo "Coverage:     ${coverage}% (avg should-trigger)"
+echo "Max overlap:  ${max_overlap}% (best near-miss)"
 echo
 echo "✓ Static description check passed"
 exit 0

@@ -1,10 +1,16 @@
 ---
 name: feature-docs
 description: >-
-  Writes, converts, syncs and looks up tracked as-built feature docs (overview, decisions,
-  tickets) in docs/<feature>/feature-docs/. Use when the user says "write the feature docs",
-  "document this feature", "convert these docs", "sync the feature docs", "what did we decide
-  about X", or when a .scratch spec or ticket changed after its docs were written.
+  Writes, converts, syncs and looks up as-built feature-docs: overview.md, decisions.md,
+  delivery-log under docs/<feature>/feature-docs/. Reconciles, updates and syncs when user-facing
+  or auth module implementation changes, or when latest sources diverge. Use when you need to look
+  up tracked decisions, or when the user says "write the feature docs", "document this feature",
+  "convert these docs", "sync the feature docs", "reconcile the feature docs", "update the feature
+  documentation", "what did we decide about X", or when .scratch specs changed. Stamps and can
+  export tracked post-delivery traced evidence records with source citations, implementation
+  rationale, acceptance outcomes, build artifacts, and retrospective analysis, distinct from
+  forward-looking task backlog, endpoint reference guides, interface schemas, or planning
+  deliverables.
 ---
 
 # feature-docs
