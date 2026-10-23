@@ -336,7 +336,7 @@ lacks "$source_map" 'docs/csv-export/feature-docs/'
 lacks "$source_map" 'docs/FEATURES.md'
 cp "$root_manifest" "$TMP/root-source.baseline"
 cp -R "$ROOT_SOURCE/.git/feature-docs" "$TMP/root-source.snapshot"
-for repeat in 1 2; do
+for _ in 1 2; do
   run 0 bash "$FD" stamp "$ROOT_SOURCE" csv-export >/dev/null
   run 0 bash "$FD" status "$ROOT_SOURCE" csv-export >/dev/null
   cmp "$root_manifest" "$TMP/root-source.baseline" || fail "repeated root-source stamp changed the baseline"

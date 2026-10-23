@@ -53,7 +53,7 @@ jobs:
         run: |
           description="$(sed -n '/^---$/,/^---$/p' skills/feature-docs/SKILL.md | sed -n '/^description:/,/^[a-z][a-z]*:/p' | sed '$d' | sed 's/^description:[[:space:]]*>-[[:space:]]*//' | sed 's/^[[:space:]]*//' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
           echo "Description: $description"
-          for phrase in "write the feature docs" "sync the feature docs" "Use when"; do
+          for phrase in "Write tracked feature" "convert existing docs" "look up decisions"; do
             if ! echo "$description" | grep -qF "$phrase"; then
               echo "ERROR: Missing trigger phrase: $phrase"
               exit 1
