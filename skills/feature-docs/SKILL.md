@@ -1,7 +1,10 @@
 ---
 name: feature-docs
 description: >-
-  Writes, converts, syncs and looks up tracked as-built feature docs (overview, decisions, tickets) in docs/<feature>/feature-docs/. Use when the user says "write the feature docs", "document this feature", "convert these docs", "sync the feature docs", "what did we decide about X", or when a .scratch spec or ticket changed after its docs were written.
+  Writes, converts, syncs and looks up tracked as-built feature docs (overview, decisions,
+  tickets) in docs/<feature>/feature-docs/. Use when the user says "write the feature docs",
+  "document this feature", "convert these docs", "sync the feature docs", "what did we decide
+  about X", or when a .scratch spec or ticket changed after its docs were written.
 ---
 
 # feature-docs

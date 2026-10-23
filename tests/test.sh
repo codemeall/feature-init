@@ -73,11 +73,14 @@ for name in SKILL.md assets/templates/overview.md assets/templates/decisions.md 
   [[ -f "$SKILL/$name" ]] || fail "missing resource: $name"
 done
 pass "shell entrypoints parse and portable skill resources exist"
-description="$(sed -n '3,/^---$/p' "$SKILL/SKILL.md" | sed '1d;$d' | tr -d '\n' | sed 's/description: *>//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+description="$(sed -n '/^---$/,/^---$/p' "$SKILL/SKILL.md" | sed -n '/^description:/,/^[a-z][a-z]*:/p' | sed '$d' | sed 's/^description:[[:space:]]*>-[[:space:]]*//' | sed 's/^[[:space:]]*//' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 description_length="${#description}"
 [[ "$description_length" -le 1024 ]] || fail "SKILL.md description is $description_length chars, exceeds 1024 char limit"
 contains "$description" "Use when"
-pass "SKILL.md description is under 1024 chars and contains 'Use when' clause"
+contains "$description" "write the feature docs"
+contains "$description" "sync the feature docs"
+[[ "$description" =~ ^[A-Z][a-z]+s ]] || fail "SKILL.md description should start with a third-person verb (e.g. 'Writes')"
+pass "SKILL.md description is under 1024 chars, contains 'Use when' and trigger phrases, and starts with third-person verb"
 for doc in README.md USAGE.md CHANGELOG.md; do
   while IFS= read -r link; do [[ -z "$link" || -e "$ROOT/$link" ]] || fail "$doc links to $link"; done < <(grep -oE '\]\(\./[^)#]*' "$doc" | sed 's/^](//' | sort -u || true)
 done
@@ -88,11 +91,15 @@ EARLY_ERROR="$TMP/early-error"
 make_repo "$EARLY_ERROR"
 early_docs="$EARLY_ERROR/docs/csv-export/feature-docs"
 # On complete docs with no v2 manifest, stamp without --evidence exits 2 and prints the evidence message
-out="$(run 2 bash "$FD" stamp "$EARLY_ERROR" csv-export 2>&1)" || true
+rc=0
+out="$(bash "$FD" stamp "$EARLY_ERROR" csv-export 2>&1)" || rc=$?
+[[ $rc -eq 2 ]] || fail "stamp without evidence on complete docs exited $rc, expected 2"
 contains "$out" "first reviewed stamp needs --evidence"
 # On incomplete docs, it should print both the structural findings and the evidence requirement
 rm "$early_docs/decisions.md"
-out="$(run 2 bash "$FD" stamp "$EARLY_ERROR" csv-export 2>&1)" || true
+rc=0
+out="$(bash "$FD" stamp "$EARLY_ERROR" csv-export 2>&1)" || rc=$?
+[[ $rc -eq 2 ]] || fail "stamp without evidence on incomplete docs exited $rc, expected 2"
 contains "$out" "first reviewed stamp needs --evidence"
 contains "$out" "INCOMPLETE"
 pass "first stamp without --evidence reports the error even when docs are incomplete"
