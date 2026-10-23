@@ -1,218 +1,140 @@
 # Usage
 
-How to use `feature-docs` day to day: what to say to an agent, what the script prints, and what to do by hand when no agent is involved. Why the skill exists and how to install it are in the [README](./README.md).
-
-`<feature>` is always the folder name under `.scratch/`, so `.scratch/csv-export/` pairs with `docs/csv-export/feature-docs/`.
+`feature-docs` creates a tracked record that a teammate or later session can understand without your local scratch files. Installation and modes are in the [README](./README.md); agents follow [SKILL.md](./skills/feature-docs/SKILL.md).
 
 ## Prompts
 
 | Situation | Say this |
 |---|---|
-| A feature is implemented | "The csv-export feature is done. Write its feature docs." |
-| A Fleet run just finished | "Run is verified. Write the feature docs for csv-export before I commit." |
-| Old docs exist | "Convert `docs/billing/` into feature docs." |
-| Loose notes exist | "Turn `notes/search-redesign.md` into feature docs for the search feature." |
-| The spec or tickets changed | "Sync the feature docs." or "Sync the csv-export feature docs." |
-| Code was refactored | "Sync the feature docs." (a moved file shows as `MISSING`) |
-| You are not sure what is stale | "Which feature docs are out of date?" |
-| You are about to change a feature | "Check the csv-export feature docs before we spec scheduled exports." |
-| You want a past decision | "What did we decide about the export rate limit, and why?" |
-| First feature documented in a repo | "Set up feature docs in this repo." |
+| Implemented or partially implemented feature | "Write the feature docs for csv-export; include remaining acceptance checks." |
+| Existing documentation | "Convert docs/billing into feature docs." |
+| Changed sources or implementation | "Sync the csv-export feature docs." |
+| Check document completeness | "Check the feature docs for unfinished scaffolds and missing files." |
+| Before changing a feature | "Read the csv-export overview and decisions before planning scheduled exports." |
+| First feature documented | "Set up feature docs in this repo." |
 
-## The script
+## What the checks establish
 
-`skills/feature-docs/scripts/feature-docs.sh`, or `scripts/feature-docs.sh` inside an installed copy of the skill. Plain bash; it needs `shasum` or `sha256sum`. In a git checkout it also keeps a private copy of the synced sources under `.git/feature-docs/`, which is what lets `diff` show changed lines.
+| Check | Establishes | Does not establish |
+|---|---|---|
+| `check` | Supported document structure, filled scaffolds, and recognized citations exist | That prose is true or complete |
+| `status` | Whether recorded source, document, or evidence files changed | That every dependency was covered or runtime behavior works |
+| Agent reconciliation | How sources, implementation, and evidence support each claim | That an unperformed test passed |
+
+Opening a test file is code inspection. A passing test requires an execution result. Runtime verification requires a scenario, environment, date, and result. Historical results are attributed and marked as not rerun. Unknown rationale or delivery dates remain unknown.
+
+## Commands
+
+Use `skills/feature-docs/scripts/feature-docs.sh` from this repository, or `scripts/feature-docs.sh` inside an installed skill. The runtime is Bash and standard Unix utilities plus `shasum` or `sha256sum`; no Node, Python, or jq is required. Git enables private source snapshots for line-level diffs.
+
+Paths are relative to the target repository unless stated otherwise. `<feature>` is the kebab-case output folder name; it normally matches `.scratch/<feature>`.
 
 ### `new <repo> <feature>`
 
-Creates `docs/<feature>/feature-docs/` with the three templates. Files that already exist are left alone.
+Create three templates in `docs/<feature>/feature-docs/`. Existing files are preserved. A new scaffold is incomplete: fill it before stamping.
 
-```text
-$ bash feature-docs.sh new . csv-export
-created  docs/csv-export/feature-docs/overview.md
-created  docs/csv-export/feature-docs/decisions.md
-created  docs/csv-export/feature-docs/tickets.md
+### `check <repo> [<feature>] [--quiet]`
+
+Check one feature, or every existing feature-docs folder. Reports missing/empty required documents, known unfinished scaffolds, supported structural defects, and recognized missing overview citations. Features with no decisions or tickets may say so explicitly instead of inventing rows.
+
+This is structural validation, not a prose-quality score. Word targets are guidance, not enforced padding or truncation. Quiet mode suppresses successful checks.
+
+### `stamp <repo> <feature> [--source <dir>] [--evidence <file> ...] [--evidence-only]`
+
+Run after reconciling docs with sources and implementation. Stamping acknowledges that review; it does not run tests. Structural checks must pass before the baseline is replaced.
+
+The first version-2 stamp needs a nonempty explicit evidence selection:
+
+```bash
+FD=skills/feature-docs/scripts/feature-docs.sh
+bash "$FD" check . csv-export
+bash "$FD" stamp . csv-export --evidence src/api/export.ts --evidence tests/export.test.ts
 ```
 
-### `stamp <repo> <feature> [--source <dir>]`
+Select files supporting documented claims: implementation, relevant tests, and configuration. This inventory does not claim tests ran. Root files such as `package.json`, extensionless files, and paths with spaces can be selected; quote shell arguments containing spaces. Directory citations check existence only, so select important child files individually.
 
-Records a hash of every `*.md` file in the source folder into `sources.json`. Run it after the docs are written or synced: it means "the docs now reflect these files". The source defaults to `.scratch/<feature>`. Pass `--source` once for a source kept elsewhere in the repo; later stamps remember it.
+Later stamps reuse the recorded selection when `--evidence` is omitted. Supplying any `--evidence` arguments **replaces the entire selection**; include every file to retain. Files outside that set are not automatically monitored.
 
-```text
-$ bash feature-docs.sh stamp . csv-export
-stamped  docs/csv-export/feature-docs/sources.json (3 files from .scratch/csv-export, synced 2026-10-06)
+Normal stamping hashes recursive `*.md` files under `.scratch/<feature>`, including maps and research answers. Use `--source planning/billing` for another source folder; later stamps remember it. Git metadata, generated `docs/*/feature-docs/` folders, and `docs/FEATURES.md` are excluded so a broad source folder cannot ingest its own output or snapshots.
+
+The version-2 `sources.json` separates source, document, and evidence hashes. Keep its generated canonical format: it is script-owned, not a file to edit or reformat. Malformed or unsupported manifests fail explicitly. Failed validation or baseline preparation preserves the previous manifest.
+
+### Stamping without local sources
+
+A teammate may have tracked docs and code but no `.scratch`:
+
+```bash
+bash "$FD" stamp . csv-export --evidence-only
 ```
+
+This refreshes document/evidence hashes while preserving the original source hashes and source-sync date. It does not claim unavailable sources were read. Source checks resume against the preserved baseline when those files return.
+
+For converted docs without an ongoing source folder, use `--evidence-only` on the first stamp together with evidence files. The manifest records no source folder; subsequent stamps remember that mode. Preserve original documents until the user requests their removal.
 
 ### `status <repo> [<feature>] [--quiet]`
 
-Reports what is out of step. Without a feature it covers every feature in the repo.
+Reports structural findings and changes to recorded inputs. Several findings can appear together; a source match does not hide code or document changes.
 
-```text
-$ bash feature-docs.sh status .
-billing  IN SYNC  1 file in planning/billing, last synced 2026-10-06
-csv-export  DRIFT  .scratch/csv-export changed since 2026-10-06
-  REMOVED  issues/02-download-button.md
-  ADDED    issues/03-retry-failed-exports.md
-  CHANGED  spec.md
-  MISSING  src/reports/csv-writer.ts (cited in overview.md)
-  PLANNED  04 Semicolon delimiter
-legacy  UNTRACKED  no sources.json (converted or hand-written; nothing to sync from)
-saved-filters  NO DOCS  .scratch/saved-filters has no feature docs
-```
-
-| State | Meaning | What to do |
-|---|---|---|
-| `IN SYNC` | The sources match the last stamp and every cited file exists | Nothing |
-| `DRIFT` | The listed source files changed, appeared or disappeared | Sync |
-| `STALE` | The sources are unchanged, but `overview.md` cites files that are gone | Sync |
-| `UNTRACKED` | The feature docs have no recorded source (converted or written by hand) | Nothing; cited files are still checked |
-| `SOURCE MISSING` | The recorded source folder is not on this machine | Nothing; the feature docs are the record here |
-| `NO DOCS` | A `.scratch/` folder has no feature docs | Write them once the feature is implemented |
-
-| Line under a feature | Meaning |
+| Condition | Action |
 |---|---|
-| `CHANGED`, `ADDED`, `REMOVED` | A source file differs from the last stamp |
-| `MISSING` | A file or folder cited in `overview.md` no longer exists: the code moved or was deleted |
-| `PLANNED` | A ticket recorded as not built yet. A reminder; it does not fail the check |
+| Incomplete documents | Fill missing content before stamping |
+| Sources changed | Reconcile changed specs, comments, answers, and tickets |
+| Evidence changed or disappeared | Review claims; correct moved paths and the evidence selection |
+| Documents changed | Review edits and stamp the revised record |
+| Legacy or absent evidence baseline | Review the feature and establish a baseline using `--evidence` |
+| Recorded files match | No detected change within recorded coverage; still inspect affected behavior when the task calls for it |
+| Source folder missing | Use the tracked record; available document/evidence checks continue |
+| Planned or partial tickets | Informational reminder of remaining implementation or acceptance checks |
 
-A citation is a backticked path with a slash that names a file (`src/api/export.ts`, with or without `:12`) or a folder (`src/api/`), written from the repo root. Only `overview.md` is checked, because it claims what exists now; `decisions.md` and `tickets.md` are history and may name files that are gone.
+Planned/partial tickets and missing local sources alone do not fail a current baseline. Quiet mode shows actionable findings and operational errors, suppressing informational notices.
 
-Exit codes: `0` in step, `1` for `DRIFT`, `STALE` or `MISSING`, `2` for bad arguments or another error. `--quiet` prints only the features that exit 1 and nothing at all when there are none, which is what the hooks use.
+Overview citation discovery uses backticked path shapes and does not recognize every filename or Markdown link. Explicit evidence selection reliably monitors root files, unusual paths, and relevant tests/configuration. Historical paths in decisions and tickets do not automatically become current evidence.
 
 ### `diff <repo> <feature>`
 
-Shows what changed in the sources since the last stamp, line by line.
+Shows changes to **source Markdown**, using the private snapshot in the Git directory when available. `SOURCES UNCHANGED` says nothing about code or document freshness. Use `status` for those findings and inspect affected code with repository tools.
 
-```text
-$ bash feature-docs.sh diff . csv-export
-REMOVED  .scratch/csv-export/issues/02-download-button.md, which said:
-  | # 02: Download button
+Without a suitable private snapshot, the command names changed files without their old lines. A source-free feature has no source diff. An unavailable recorded source is reported as an error, not treated as unchanged.
 
-ADDED    .scratch/csv-export/issues/03-retry.md (new file: read it in full)
+### Exit codes
 
-CHANGED  .scratch/csv-export/spec.md
---- synced/spec.md
-+++ current/spec.md
-@@ -4,4 +4,4 @@
- 
- ## Implementation Decisions
- 
--- Always comma delimiter
-+- Delimiter follows the workspace locale
-```
+| Code | Meaning |
+|---|---|
+| `0` | Command succeeded, or no actionable findings within its scope |
+| `1` | Structural findings, missing review baseline, or detected drift |
+| `2` | Invalid arguments, unsupported/malformed manifest, or operational error |
 
-Outside a git checkout, or on a machine that never stamped the feature, there is no copy to compare with and `diff` names the changed files without their lines.
+Exit `0` does not prove test execution or semantic correctness. In multi-feature checks, operational errors take precedence over findings.
 
-### `index <repo>` and `setup <repo> [--file CLAUDE.md|AGENTS.md]`
+### `index <repo>` and `setup <repo> [--file CLAUDE.md or AGENTS.md]`
 
-`index` writes `docs/FEATURES.md` from each feature's `Summary:` and `Updated:` lines. `setup` does that and also appends a "Feature docs" section to `CLAUDE.md`, or to `AGENTS.md` when there is no `CLAUDE.md`. With neither file present it asks you to choose with `--file`. Once the index exists, `new` and `stamp` keep it current.
+`index` generates `docs/FEATURES.md` from each overview's `Summary:` and `Updated:` lines. `setup` adds a pointer to the repository's agent instructions. With neither instruction file present, specify which to create. Existing sections are preserved. Once the index exists, `new` and successful stamps refresh it.
 
-```text
-$ bash feature-docs.sh setup .
-wrote    docs/FEATURES.md (1 feature)
-added    Feature docs section to CLAUDE.md
-```
-
-The section it adds:
-
-```markdown
-## Feature docs
-
-Built features are recorded in `docs/<feature>/feature-docs/`; `docs/FEATURES.md` lists them. Before speccing, ticketing or changing a listed feature, read its `decisions.md` and cite the decision IDs the change builds on or overturns. Write, convert and sync these docs with the `feature-docs` skill.
-```
+Future sessions find the overview and decisions before changes; tickets provide acceptance evidence and gaps. The tracked record must stand alone even when local source links are unavailable.
 
 ### `hook <repo>`
 
-Installs a `pre-commit` hook that runs `status --quiet`. It prints what is out of step and always lets the commit through.
+Installs a local pre-commit hook running `status --quiet`. It reports findings/errors but always allows the commit. An unrelated existing hook is preserved; the command prints a line to add instead of replacing it. Rerun installation if the skill path changes.
 
-```text
-$ git commit -m "refactor report writer"
-Feature docs are out of step with their sources or the code. Sync them with the feature-docs skill ("sync the feature docs"):
-csv-export  STALE  .scratch/csv-export is unchanged since 2026-10-06, but the docs cite files that are gone
-  MISSING  src/reports/csv-writer.ts (cited in overview.md)
-[main 3f2a9c1] refactor report writer
-```
+The optional Claude Code session hook is in [references/setup.md](./skills/feature-docs/references/setup.md).
 
-If the repo already has a `pre-commit` hook, the command leaves it alone and prints the one line to add to it. The Claude Code `SessionStart` variant is in [`references/setup.md`](./skills/feature-docs/references/setup.md).
+## Reconciliation rules
 
-## Walk-throughs
+- **Partial delivery:** identify incomplete acceptance criteria. Implemented code awaiting a required runtime check remains `partial`, with that distinction stated.
+- **Discovery:** resolved research, prototype, or discussion tickets contribute durable conclusions, not delivered production behavior. See [references/sources.md](./skills/feature-docs/references/sources.md).
+- **Conflicts:** code establishes behavior; recorded sources establish intent and rationale. Preserve material disagreements rather than inventing approval.
+- **Source cleanup:** deleting a scratch issue changes provenance. Withdraw work only with evidence that it was dropped.
+- **History:** retain IDs and superseded rows; preserve hand-written corrections. An unchanged sync preserves dates and bytes.
+- **Compactness:** give each fact one authoritative location. Preserve reasons and acceptance evidence, not transcripts.
 
-### Write, after an implementation
+The [filled example](./skills/feature-docs/references/example.md) illustrates detail level. [Conversion guidance](./skills/feature-docs/references/convert.md) covers older feature/plan/progress documents.
 
-1. Finish and verify the tickets in `.scratch/csv-export/issues/`.
-2. Ask: "Write the feature docs for csv-export."
-3. The agent runs `new`, reads the spec, the tickets and the code, fills the three docs and runs `stamp`.
-4. Read `overview.md`. Check "Not built yet": anything there was specced or ticketed and is absent from the code.
-5. Read the end of the agent's report for glossary and ADR candidates, and record the ones you agree with.
-6. Commit `docs/csv-export/feature-docs/` together with the code.
+## Upgrading existing records
 
-By hand: run `new`, fill the three files using [`references/example.md`](./skills/feature-docs/references/example.md) as the model, then run `stamp` and `status`.
+Unversioned manifests remain readable for source drift and source diffs, including safe legacy source spellings such as `./.scratch/feature`. They lack reviewed code/document baselines, so source matches alone require review. Reading does not rewrite the manifest; migration normalizes the source path.
 
-### Convert an old 3-doc folder
+In version 2, source-only records return `REVIEW REQUIRED` with exit 1. To upgrade one feature, reconcile its docs, run `check`, then `stamp` with explicit evidence files. Update older bare first-stamp automation to provide that one-time selection and handle review-required results. Existing decision and ticket IDs remain; no bulk history rewrite occurs.
 
-1. Ask: "Convert `docs/billing/` into feature docs."
-2. The agent reads `feature.md`, `plan.md` and `progress.md`, checks their claims against the code and writes `docs/billing/feature-docs/`. The mapping it follows is in [`references/convert.md`](./skills/feature-docs/references/convert.md).
-3. Decisions keep their numbers. Milestones become ticket rows. A box the old docs left unticked for work the code now shows is recorded as `delivered`, with a note.
-4. The agent lists the original files, and any agent instructions that still point at them, and asks whether to delete the originals. Keep them until you have read the new docs.
+## Scope
 
-A converted folder has no `sources.json` and shows as `UNTRACKED`. That is correct: nothing local feeds it. Its cited files are still checked.
-
-### Sync after the spec changed
-
-1. Change the feature the usual way: `to-spec` updates `.scratch/csv-export/spec.md`, `to-tickets` adds `issues/04-semicolon-delimiter.md`.
-2. Ask: "Sync the feature docs."
-3. The agent runs `status` and `diff`, and updates the matching rows:
-   - the changed decision becomes a new row in `decisions.md`, and the row it replaces is marked `Superseded by D6`;
-   - ticket 04 is added to `tickets.md` as `planned`, because the code does not show it yet.
-4. From then on `status` lists `PLANNED  04 Semicolon delimiter`. After ticket 04 is implemented, sync again: it moves to `delivered` and its capability joins "What was built".
-
-### Sync after a refactor
-
-1. Rename or delete a file that `overview.md` cites. No spec changes.
-2. The pre-commit hook, the session hook or a manual `status` prints `STALE` with a `MISSING` line.
-3. Ask: "Sync the feature docs." The agent finds where the capability lives now and corrects the path. If the capability was removed, its row comes out of "What was built" and a decision row records the removal.
-
-### Look up, before a change
-
-1. Ask: "Check the csv-export feature docs before we spec scheduled exports."
-2. The agent reads `decisions.md` and `overview.md` and tells you which decisions the change touches.
-3. The new spec cites them: "builds on D1 (streaming)", "supersedes D5 (date format)".
-
-## With agent-fleet
-
-Fleet implements approved tickets and leaves commits to you. Feature docs fit between verification and your commit:
-
-1. `grill-with-docs` → `to-spec` → `to-tickets` write `.scratch/<feature>/`.
-2. Fleet plans, launches and verifies the tickets.
-3. Ask the lead to write the feature docs, or to sync them when the feature already has some. The run's `notes.md` and plan decisions are sources for `decisions.md`; its reports and evidence files feed the Testing section and date each delivered ticket (`verified_at` in `fleet resume <run> --json`). A lead with this skill installed runs `status` on a documented feature before its closing report and lists what is out of step.
-4. Review and commit the code and the feature docs together.
-
-## With a glossary and ADRs
-
-The skill reads `docs/agents/domain.md` when the repo has one (written by `setup-matt-pocock-skills`), and otherwise looks for `CONTEXT.md` or `GLOSSARY.md` and `docs/adr/`.
-
-- Feature docs use the glossary's terms.
-- A decision that an ADR, or another feature's decision table, already records gets one row that cites it. The reasoning is not copied.
-- A decision that binds other features is named in the agent's report as an ADR candidate, and a new term as a glossary candidate. You record them with your usual process; the skill does not write ADRs or edit the glossary.
-
-## Questions
-
-**Why not just commit `.scratch/`?** A spec is written before the code and is meant to go stale: it names no files and it does not record what changed during the build. Feature docs are written after, from the code. Committing the spec would track the intention, not the result.
-
-**The feature folder is named differently from the `.scratch/` folder.** Use the name you want under `docs/` as `<feature>` and pass the real source once: `stamp . billing --source .scratch/billing-v2`.
-
-**The repo is a monorepo, or uses submodules.** Run the script on the repo root and cite files from there, including the package folder: `apps/console/src/export.ts`. A file inside a checked-out submodule is found like any other.
-
-**I edited the feature docs by hand. Will a sync undo it?** No. Sync only applies what changed in the sources and the code, and it never writes back to `.scratch/`.
-
-**A teammate cloned the repo and `status` says `SOURCE MISSING`.** Expected. `.scratch/` is on your machine, not theirs. The feature docs are their record, and `MISSING` and `PLANNED` lines still work for them.
-
-**`status` flags something that is not a file.** Citations are recognised by shape: a backticked token with a slash whose last part has a dot, or that ends in a slash. Write a route as `/api/export` (a leading slash is ignored), or drop the backticks.
-
-**What does sync do when a ticket file is deleted?** The row stays and its status becomes `withdrawn`, with the reason. The agent asks for the reason when the sources do not give one.
-
-**Can one spec produce several feature folders?** Yes, when it covers several features. The agent proposes the split and asks before writing.
-
-**Does it track files other than Markdown?** No. Specs and tickets are Markdown, and tracking only `*.md` keeps editor and OS files out of the drift report.
-
-**Where is the private copy of the sources, and is it safe?** In `.git/feature-docs/<feature>/`. Git never tracks or pushes anything inside `.git/`, and each `stamp` replaces it.
+The skill does not run an issue tracker, replace ADRs, or copy `.scratch` into Git. It uses glossary terms and links shared decisions to their existing authority. It reports glossary/ADR candidates for the project's normal process. Installing the skill does not publish or commit generated docs.

@@ -2,7 +2,7 @@
 
 **Tracked feature docs for work that was specced and ticketed in local, untracked files.**
 
-When a feature is built from a spec and tickets that live in `.scratch/`, the code reaches git and the reasoning does not. `feature-docs` is an agent skill that writes the reasoning down next to the code: one folder per feature, `docs/<feature>/feature-docs/`, describing what was built and why. It converts docs you already have into that shape, keeps the folder in step when the spec, the tickets or the code change, and makes later agents read it before they change the feature.
+When a feature is built from a spec and tickets that live in `.scratch/`, the code reaches git and the reasoning does not. `feature-docs` is an agent skill that writes the reasoning down next to the code: one folder per feature, `docs/<feature>/feature-docs/`, describing what exists, why, what remains, and what was verified. It converts existing docs, reconciles changes, and points later agents at the record before they change the feature.
 
 The skill was called `feature-init` until 2026-10-06, and this repository still carries that name. See [Upgrading](./CHANGELOG.md#upgrading).
 
@@ -25,7 +25,7 @@ That workflow leaves five gaps, and each one is a reason the skill exists:
 | `.scratch/` never leaves your machine | A teammate, a fresh clone or a new laptop has the code and no record of why it looks that way | Put the record in `docs/`, committed with the code |
 | A spec is written before the code | It names no files (on purpose, they would go stale) and it does not know what changed during the build | Record the feature **as built**: every capability cites the file that proves it |
 | Decisions live in the spec and the chat | The next agent re-argues a choice that was already settled, or quietly reverses it | Keep a decisions table with the reason and the rejected alternative, cited by ID in later specs |
-| Specs, tickets and code keep changing | Docs written once drift from all three | Detect a changed spec or ticket by hash, and a moved or deleted file by checking every cited path |
+| Specs, tickets and code keep changing | Docs written once drift from all three | Compare source, document, and explicitly selected code/test hashes; check supported overview citations for missing paths |
 | Nobody remembers the docs are there | The next session starts from the code alone | An index, a pointer in the agent instructions, and optional hooks that surface drift on their own |
 
 ## What you get
@@ -36,8 +36,8 @@ docs/
 └── csv-export/feature-docs/
     ├── overview.md             summary, problem, solution, what was built (with file citations), testing, out of scope
     ├── decisions.md            every significant choice: why, alternative rejected, source, status, date
-    ├── tickets.md              the slices delivered and their acceptance criteria
-    └── sources.json            hashes of the spec and ticket files at the last sync (written by the script)
+    ├── tickets.md              delivery states, acceptance criteria, and evidence
+    └── sources.json            source, document, and selected evidence hashes (written by the script)
 ```
 
 A filled example of all three docs: [`skills/feature-docs/references/example.md`](./skills/feature-docs/references/example.md).
@@ -48,11 +48,11 @@ Each one is a mode of the skill. You say the sentence; the agent does the rest.
 
 ### 1. Write: a feature has just been implemented
 
-**When:** the tickets are done and verified, and you are about to commit.
+**When:** implementation exists and needs a durable record, including any unfinished acceptance checks.
 
 > "The csv-export feature is done. Write its feature docs."
 
-The agent reads `.scratch/csv-export/spec.md`, every ticket and any decisions recorded during the build, opens the code behind each ticket, and writes `docs/csv-export/feature-docs/`. Anything specced but missing from the code is listed under "Not built yet" instead of being described as done. You review and commit the folder with the code.
+The agent reads the spec, tickets, relevant comments and discovery conclusions, opens the implementation and tests, and writes the three docs. A resolved research or prototype ticket contributes its conclusion; it does not become shipped functionality. Partial implementation and outstanding acceptance checks stay visible. Code inspection, passing tests, and runtime verification are recorded separately. You review and commit the folder with the code.
 
 ### 2. Convert: you already have docs somewhere
 
@@ -61,7 +61,7 @@ The agent reads `.scratch/csv-export/spec.md`, every ticket and any decisions re
 > "Convert `docs/billing/` into feature docs."
 > "Turn `notes/search-redesign.md` and the Search section of the README into feature docs."
 
-The agent reads what you pointed at, checks each claim against the code, and writes the feature docs. A claim the code contradicts is recorded as the code has it; a claim nothing can confirm is marked `unverified`. Decisions keep their original numbers. The originals stay where they are until you say to delete them.
+The agent reads what you pointed at, checks each claim, and writes the feature docs. Code establishes current behavior; recorded decisions establish accepted intent. A disagreement remains visible, and missing rationale is marked as not recorded. Decisions keep their original numbers. The originals stay where they are until you say to delete them.
 
 ### 3. Sync: the spec, the tickets or the code changed
 
@@ -69,14 +69,12 @@ The agent reads what you pointed at, checks each claim against the code, and wri
 
 > "Sync the feature docs."
 
-The agent runs the status check, which names exactly what is out of step:
+The agent runs structural and freshness checks, then reconciles the affected sources and evidence. For example:
 
 ```text
-csv-export  DRIFT  .scratch/csv-export changed since 2026-10-06
-  ADDED    issues/04-semicolon-delimiter.md
-  CHANGED  spec.md
-  MISSING  src/reports/csv-writer.ts (cited in overview.md)
-  PLANNED  03 Export rate limit
+Source change: .scratch/csv-export/spec.md
+Evidence change: src/reports/csv-writer.ts
+Remaining work: ticket 03, Export rate limit
 ```
 
 It then reads the changed lines and updates the matching rows:
@@ -84,7 +82,11 @@ It then reads the changed lines and updates the matching rows:
 - A changed decision becomes a new row and the old one is marked superseded, so the history stays readable.
 - A new ticket that is not in the code yet is recorded as `planned`, not as built.
 - A cited file that moved gets its path corrected.
-- A `planned` ticket the code now shows becomes `delivered`.
+- A ticket becomes `delivered` when every acceptance criterion has appropriate evidence.
+
+Delivery requires evidence appropriate to every acceptance criterion. A ticket with implemented code but an outstanding required load or device check remains `partial`. Deleting a scratch file alone does not withdraw the work. An unchanged sync leaves dates and history alone.
+
+The script checks recorded files, not every dependency or runtime environment. Matching hashes do not prove semantic correctness or test success. The agent still reviews affected behavior when asked to sync after an implementation change.
 
 ### 4. Look up: before changing a documented feature
 
@@ -92,12 +94,12 @@ It then reads the changed lines and updates the matching rows:
 
 > "We're adding scheduled exports. Check the csv-export feature docs first."
 
-The agent reads `decisions.md` and `overview.md` and carries the relevant decisions into the new spec by ID ("builds on D1", "supersedes D5"). A decision it wants to overturn is raised with you first. After the [one-time setup](#one-time-setup-per-repo), agents do this without being asked.
+The agent reads `overview.md` for context, then `decisions.md` before proposing changes, and consults `tickets.md` for acceptance evidence and gaps. It carries the relevant decisions into the new spec by ID ("builds on D1", "proposes to supersede D5"). An accepted replacement is reconciled through SYNC. After the [one-time setup](#one-time-setup-per-repo), agents do this without being asked.
 
 ### When not to use it
 
-- **Before the feature is built.** The spec is the document for that stage. Feature docs describe code that exists.
-- **For a fix that changes no decision and no capability.** The commit message is enough.
+- **Before implementation starts.** The spec is the document for that stage. Partially built features can have feature docs, with their gaps recorded.
+- **For new prose after a fix that changes no documented claim.** Existing evidence baselines may still need review and refresh.
 - **As a progress tracker.** Ticket status during a build belongs to the tickets and to the run that implements them.
 - **As a replacement for ADRs or the glossary.** A decision that binds other features belongs in an ADR; the feature docs cite it. The skill names such decisions as candidates and leaves recording them to you.
 
@@ -131,6 +133,8 @@ git clone https://github.com/codemeall/feature-init.git && cd feature-init
 
 For an agent without skill support, paste [`adapters/AGENTS-snippet.md`](./adapters/AGENTS-snippet.md) into the repo's `AGENTS.md`. Older Cursor versions can use the rule file [`adapters/feature-docs.mdc`](./adapters/feature-docs.mdc).
 
+Version 2 requires explicit evidence files on the first stamp and a completed document structure. Existing source-only manifests require review before upgrading. Follow [Upgrading existing records](./USAGE.md#upgrading-existing-records) when updating an installation or automation from version 1.
+
 ## One-time setup per repo
 
 Three optional steps make the docs work without anyone remembering them. The agent offers them after the first feature is documented; you can also run them yourself.
@@ -148,21 +152,23 @@ The script is plain bash and needs only `shasum` or `sha256sum`. In a git checko
 ```bash
 FD=skills/feature-docs/scripts/feature-docs.sh
 bash $FD new    /path/to/repo csv-export   # create the three docs from the templates
-bash $FD stamp  /path/to/repo csv-export   # record the sources as synced today
-bash $FD status /path/to/repo              # every feature: in sync, drifted, stale, or undocumented
+                                         # fill the docs and review their evidence
+bash $FD check  /path/to/repo csv-export   # check structure and supported citations
+bash $FD stamp  /path/to/repo csv-export --evidence src/export.ts --evidence tests/export.test.ts
+bash $FD status /path/to/repo              # document, source, and recorded evidence changes
 bash $FD diff   /path/to/repo csv-export   # the changed lines since the last stamp
 ```
 
-Commands, output and exit codes are in [USAGE.md](./USAGE.md), with a walk-through of each use case and the questions that come up.
+Commands, compatibility notes and exit codes are in [USAGE.md](./USAGE.md).
 
 ## For AI agents
 
 The instructions are in [`skills/feature-docs/SKILL.md`](./skills/feature-docs/SKILL.md). The short version:
 
-- Feature docs are **as-built**. "What was built" and a `delivered` ticket come from code you opened; decisions come from the sources and the conversation.
+- Feature docs are **as-built**. Claims need appropriate evidence: opening a test file is not running it, and observed code is not proof of an accepted decision.
 - Pick the mode from the situation: implemented and undocumented → write; pointed at existing docs → convert; sources or cited code changed → sync; about to change a documented feature → look up.
-- `status` tells you what is out of step and `diff` shows the lines; you never edit `sources.json` yourself.
-- Cite files as paths from the repo root, in backticks. `status` checks every one.
+- `check` catches structural defects, `status` compares recorded inputs, and `diff` shows source changes. You never edit `sources.json` yourself.
+- Cite implementation paths from the repo root and explicitly select reviewed files with `--evidence`. Later stamps reuse that selection; a supplied list replaces it.
 - Rows in `decisions.md` and `tickets.md` are superseded or withdrawn, never deleted.
 - Use the repo's glossary terms, cite an ADR instead of restating it, and name glossary and ADR candidates in your report.
 
@@ -171,9 +177,10 @@ The instructions are in [`skills/feature-docs/SKILL.md`](./skills/feature-docs/S
 ```text
 skills/feature-docs/           the portable skill
   SKILL.md                     agent instructions: the four modes and the rules
-  scripts/feature-docs.sh      new | stamp | status | diff | index | setup | hook
+  scripts/feature-docs.sh      new | check | stamp | status | diff | index | setup | hook
   assets/templates/            overview.md, decisions.md, tickets.md
   references/convert.md        where each kind of existing doc lands
+  references/sources.md        scratch comments, discovery answers, conflicts, and Fleet evidence
   references/example.md        a filled set of feature docs, before and after a sync
   references/setup.md          the index, the pointer and the hooks
 adapters/                      AGENTS.md snippet and Cursor rule, for agents without skill support

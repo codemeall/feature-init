@@ -1,37 +1,38 @@
 # <Feature>
 
-> Summary: <one sentence saying what this feature does; it is the feature's line in docs/FEATURES.md>
-> Feature docs: the tracked, as-built record of this feature. Updated: <YYYY-MM-DD>
-> Read order: this file → `decisions.md` → `tickets.md`. Each fact lives in one of the three.
-> Source: `<.scratch/feature, or "converted from <paths> on <date>">` (local and untracked; `sources.json` records the last sync)
+> Summary: <one sentence describing the feature's current capability>
+> Feature docs: the tracked record of this feature. Updated: <YYYY-MM-DD>
+> Read this overview for context, decisions before changes, and tickets for acceptance evidence and gaps.
+> Source: <source path or converted origins>
 
 ## Problem
 
-Who had the problem and what it was, from their side.
+<problem>
 
 ## Solution
 
-What the feature does for that person, in one paragraph. Use the repo's glossary terms.
+<solution>
 
 ## What was built
 
-One row per capability that exists in the code today. Cite the file that proves it, as a path from the repo root in backticks: `status` checks that every such path still exists.
+Implementation claims cite inspected repository-relative files; they do not imply passing tests or runtime verification.
 
 | Capability | Where (`path/file`) | Notes |
 |---|---|---|
+| <capability> | <path/file> | <notes> |
 
 ## How it fits together
 
-The modules, interfaces, data and contracts a later change has to respect. Point at the code; restate only what the code cannot say.
+<contracts or None>
 
 ## Testing
 
-What is tested, at which seam, and the command that runs it. List any agreed check that is still outstanding, with the date it was last known to be.
+<verification summary with ticket links or None>
 
 ## Out of scope
 
-Deliberately not built, each with its reason.
+<scope exclusions with decision links or None>
 
 ## Not built yet
 
-Specified or ticketed but absent from the code. Empty when the feature is complete.
+<ticket links for incomplete work or required verification, or None>

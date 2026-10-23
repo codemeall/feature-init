@@ -3,25 +3,34 @@
 #
 # Feature docs live in <repo>/docs/<feature>/feature-docs/ and are tracked in git. Their sources
 # (the spec and tickets, by default <repo>/.scratch/<feature>/) are local and untracked, so git
-# cannot say when they change. `stamp` records a hash of every source file in sources.json and
-# keeps a private copy under .git/feature-docs/; `status` and `diff` compare against them.
+# cannot say when they change. `stamp` acknowledges review and records source, document and
+# selected code/test hashes in sources.json. Hash matches are not proof of semantic correctness.
 #
 # Usage:
 #   feature-docs.sh new    <repo> <feature>                    create the folder from the templates
-#   feature-docs.sh stamp  <repo> <feature> [--source <dir>]   record the sources as synced today
-#   feature-docs.sh status <repo> [<feature>] [--quiet]        changed sources, cited files that are gone, planned tickets
+#   feature-docs.sh check  <repo> [<feature>] [--quiet]        check the three documents
+#   feature-docs.sh stamp  <repo> <feature> [--source <dir>] [--evidence <file> ...] [--evidence-only]
+#   feature-docs.sh status <repo> [<feature>] [--quiet]        source/document/evidence drift and remaining work
 #   feature-docs.sh diff   <repo> <feature>                    line-level source changes since the last stamp
 #   feature-docs.sh index  <repo>                              write docs/FEATURES.md, the list of documented features
 #   feature-docs.sh setup  <repo> [--file CLAUDE.md|AGENTS.md] write the index and point the agent instructions at it
 #   feature-docs.sh hook   <repo>                              install a pre-commit hook that warns when docs are out of step
 #
-# <dir> is relative to <repo>; the default is .scratch/<feature>. Only *.md files are tracked.
+# <dir> is relative to <repo>; the default is .scratch/<feature>. Sources include *.md files,
+# excluding Git metadata, generated feature-docs folders and docs/FEATURES.md.
+# First stamp needs --evidence files; later stamps reuse the list unless a new list is supplied.
+# --evidence-only preserves old source hashes/date, or creates a source-free review baseline.
+# stamp acknowledges that the docs were reconciled with the selected files; it never runs tests.
+# Manifests use a strict script-owned JSON layout; externally reformatted JSON is unsupported.
 # --quiet prints only the features that are out of step, and nothing when none are.
-# Exit codes: 0 done or in sync, 1 out of step (status, diff), 2 usage or other error.
+# Exit codes: 0 success, 1 structural findings/review required/drift, 2 usage or operational error.
 set -euo pipefail
 
 BASE="$(cd "$(dirname "$0")" && pwd)"
 TPL_DIR="$BASE/../assets/templates"
+MANIFEST_AWK="$BASE/manifest.awk"
+WORK=""
+trap '[[ -z "$WORK" ]] || rm -rf "$WORK"' EXIT
 TODAY="$(date +%Y-%m-%d)"
 INDEX="docs/FEATURES.md"
 
@@ -46,38 +55,72 @@ check_slug() {
   [[ "$1" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || die "feature must be kebab-case (e.g. csv-export): $1"
 }
 
-# Prints "path<TAB>hash" for every *.md under $1, sorted by path.
-current_hashes() {
-  local src="$1" path
-  (cd "$src" && find . -type f -name '*.md' | sed 's|^\./||' | LC_ALL=C sort) | while IFS= read -r path; do
-    case "$path" in *'"'*|*'\'*|*$'\t'*) die "unsupported character in source file name: $path" ;; esac
-    printf '%s\t%s\n' "$path" "$(hash_file "$src/$path")"
+# The manifest is generated, not hand-authored. Fail closed on unfamiliar layouts.
+validate_manifest() { awk -v mode=validate -f "$MANIFEST_AWK" "$1"; }
+manifest_field() { awk -v mode=field -v field="$2" -f "$MANIFEST_AWK" "$1"; }
+recorded_hashes() { awk -v mode=hashes -v field="${2:-files}" -f "$MANIFEST_AWK" "$1" | LC_ALL=C sort; }
+
+safe_relative() {
+  local path="$1"
+  case "$path" in
+    ''|/*|..|../*|*/..|*/../*|./*|*/./*|*/.|*//*|*'"'*|*'\'*|*$'\n'*|*$'\r'*|*$'\t'*)
+      die "unsupported repo-relative path: $path" ;;
+  esac
+  if printf '%s' "$path" | LC_ALL=C grep -q '[[:cntrl:]]'; then die "control character in path"; fi
+}
+
+# Resolve existing paths without realpath/Python, including symlinks, then enforce containment.
+contained_path() {
+  local repo="$1" path="$2" root resolved parent target hops=0
+  safe_relative "$path"
+  root="$(cd "$repo" && pwd -P)" || return 2
+  resolved="$root/$path"
+  while :; do
+    if [[ -d "$resolved" ]]; then resolved="$(cd "$resolved" && pwd -P)" || return 2; break; fi
+    parent="$(cd "$(dirname "$resolved")" 2>/dev/null && pwd -P)" || return 1
+    resolved="$parent/$(basename "$resolved")"
+    if [[ ! -L "$resolved" ]]; then break; fi
+    hops=$((hops + 1)); [[ "$hops" -le 40 ]] || die "symlink loop: $path"
+    target="$(readlink "$resolved")" || return 2
+    case "$target" in /*) resolved="$target" ;; *) resolved="$parent/$target" ;; esac
   done
+  case "$resolved" in "$root"|"$root"/*) ;; *) die "path resolves outside the repo: $path" ;; esac
+  [[ -e "$resolved" ]]
 }
 
-# Prints "path<TAB>hash" for every file recorded in the manifest $1.
-recorded_hashes() {
-  sed -n 's/^    "\(.*\)": "\([0-9a-f]\{64\}\)",\{0,1\}$/\1	\2/p' "$1"
+# Source names with spaces work. Reject unsupported names before producing canonical JSON.
+current_hashes() { # source directory, repo
+  local src="$1" path digest source_root repo_root
+  source_root="$(cd "$src" && pwd -P)" || return 2
+  repo_root="$(cd "$2" && pwd -P)" || return 2
+  (cd "$src" && find . -type d -name .git -prune -o -type f -name '*.md' -print0) | while IFS= read -r -d '' path; do
+    path="${path#./}"
+    # A broad source folder must not ingest its own output or private snapshots.
+    case "$source_root/$path" in
+      "$repo_root"/.git/*|"$repo_root"/docs/FEATURES.md|"$repo_root"/docs/*/feature-docs/*) continue ;;
+    esac
+    safe_relative "$path"
+    digest="$(hash_file "$src/$path")" || return 2
+    printf '%s\t%s\n' "$path" "$digest" || return 2
+  done | LC_ALL=C sort
 }
 
-manifest_field() { # $1 = manifest, $2 = field name
-  sed -n "s/^  \"$2\": \"\(.*\)\",\{0,1\}\$/\1/p" "$1" | head -n 1
-}
-
-# Prints "path<TAB>CHANGED|ADDED|REMOVED" for every source file that differs from the manifest.
-source_changes() { # $1 = manifest, $2 = source dir
-  local old new
-  old="$(tmpfile)"; new="$(tmpfile)"
-  recorded_hashes "$1" > "$old"
-  current_hashes "$2" > "$new" || { rm -f "$old" "$new"; exit 2; }
+compare_hashes() {
   awk -F'\t' '
     FILENAME == ARGV[1] { old[$1] = $2; next }
     { seen[$1] = 1
       if (!($1 in old)) print $1 "\tADDED"
       else if (old[$1] != $2) print $1 "\tCHANGED" }
     END { for (p in old) if (!(p in seen)) print p "\tREMOVED" }
-  ' "$old" "$new" | LC_ALL=C sort
+  ' "$1" "$2" | LC_ALL=C sort
+}
+
+source_changes() { # manifest, source directory, repo
+  local old new rc=0
+  old="$(tmpfile)"; new="$(tmpfile)"
+  recorded_hashes "$1" > "$old" && current_hashes "$2" "$3" > "$new" && compare_hashes "$old" "$new" || rc=2
   rm -f "$old" "$new"
+  return "$rc"
 }
 
 # Where the private copy of a feature's synced sources is kept. Fails when <repo> is not the
@@ -104,17 +147,88 @@ missing_citations() { # $1 = repo, $2 = overview.md
         */*) case "${path##*/}" in *.*) ;; *) continue ;; esac ;;
         *) continue ;;
       esac
-      [[ -e "$1/$path" ]] || echo "$path"
+      local rc=0
+      contained_path "$1" "${path%/}" || rc=$?
+      [[ "$rc" -ne 2 ]] || return 2
+      [[ "$rc" -eq 0 ]] || echo "$path"
     done
 }
 
-# Tickets whose status is `planned`, as "<number> <title>".
-planned_tickets() { # $1 = tickets.md
+# Parse the actual Status column, not arbitrary cells containing the word planned.
+ticket_reminders() {
   [[ -f "$1" ]] || return 0
   awk -F'|' '
     function trim(s) { gsub(/^[ \t`*]+|[ \t`*]+$/, "", s); return s }
-    /^\|/ { for (i = 2; i <= NF; i++) if (tolower(trim($i)) == "planned") { print trim($2) " " trim($3); next } }
+    /^\|/ {
+      for (i = 2; i <= NF; i++) if (tolower(trim($i)) == "status") { col = i; next }
+      if (col && (tolower(trim($col)) == "planned" || tolower(trim($col)) == "partial"))
+        print toupper(trim($col)) "  " trim($2) " " trim($3)
+    }
   ' "$1"
+}
+
+# Deterministic shape/scaffold checks only. No semantic claims, invented dates, or mandatory rows.
+structure_findings() {
+  local repo="$1" slug="$2" dest name path heading missing
+  dest="$repo/docs/$slug/feature-docs"
+  for name in overview.md decisions.md tickets.md; do
+    path="$dest/$name"
+    if [[ -e "$path" || -L "$path" ]]; then contained_path "$repo" "docs/$slug/feature-docs/$name" || return 2; fi
+    if [[ ! -s "$path" ]] || ! grep -q '[^[:space:]]' "$path"; then
+      echo "  INCOMPLETE  $name is missing or empty"; continue
+    fi
+    contained_path "$repo" "docs/$slug/feature-docs/$name" || return 2
+    grep -q '^# .[^[:space:]]*' "$path" || echo "  INCOMPLETE  $name needs a title"
+    # Only known template markers, not arbitrary angle-bracket syntax in real documentation.
+    if grep -Eq '<(Feature|YYYY-MM-DD|title|NN|one sentence|\.scratch/feature|source path|problem|solution|capability|path/file|notes|contracts|verification summary|scope exclusions|ticket links|decision|recorded reason|source>|Accepted,|criterion|ticket|what|blocked|status|date|material conflict)' "$path" ||
+       grep -Eq '^(Who had the problem and what it was, from their side\.|What the feature does for that person, in one paragraph\.|What is tested, at which seam, and the command that runs it\.|Expand here only the decisions that took real debate:|- \[ \] …)' "$path"; then
+      echo "  INCOMPLETE  $name contains unfinished template text"
+    fi
+  done
+  if [[ -s "$dest/overview.md" ]]; then
+    grep -Eq '^> Summary: [^[:space:]]' "$dest/overview.md" || echo '  INCOMPLETE  overview.md needs Summary:'
+    grep -Eq 'Updated: ([0-9]{4}-[0-9]{2}-[0-9]{2}|Unknown)' "$dest/overview.md" || echo '  INCOMPLETE  overview.md needs Updated:'
+    for heading in 'Problem' 'Solution' 'What was built' 'How it fits together' 'Testing' 'Out of scope' 'Not built yet'; do
+      grep -Fxq "## $heading" "$dest/overview.md" || echo "  INCOMPLETE  overview.md needs section: $heading"
+    done
+  fi
+  for name in decisions tickets; do
+    [[ -s "$dest/$name.md" ]] || continue
+    if ! awk -F'|' -v kind="$name" '
+      function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+      /^\|/ {
+        if (trim($2) == "#" && trim($3) == (kind == "decisions" ? "Decision" : "Ticket") &&
+            trim($6) == "Status" && trim($7) == "Date") found = 1
+      }
+      END { exit !found }
+    ' "$dest/$name.md"; then echo "  INCOMPLETE  $name.md needs its record table"; fi
+    awk -F'|' -v kind="$name" '
+      function trim(s) { gsub(/^[ \t`*]+|[ \t`*]+$/, "", s); return s }
+      /^\|/ {
+        if (trim($2) == "#" && trim($3) == (kind == "decisions" ? "Decision" : "Ticket")) { records = 1; next }
+        if (!records || trim($2) ~ /^[-:]+$/) next
+        id = trim($2)
+        if (id == "" || tolower(id) == "none") next
+        if (id in ids) print "  INCOMPLETE  " kind ".md duplicate ID: " id
+        ids[id] = 1
+        status = trim($6)
+        if (kind == "decisions" && status ~ /^Superseded by D[0-9]+$/) {
+          sub(/^Superseded by /, "", status); targets[status] = 1
+        }
+        next
+      }
+      { records = 0 }
+      END {
+        for (target in targets) if (!(target in ids))
+          print "  INCOMPLETE  decisions.md supersession target is missing: " target
+      }
+    ' "$dest/$name.md" || return 2
+  done
+  if [[ -s "$dest/tickets.md" ]]; then
+    grep -Fxq '## Acceptance criteria' "$dest/tickets.md" || echo '  INCOMPLETE  tickets.md needs Acceptance criteria'
+  fi
+  missing="$(missing_citations "$repo" "$dest/overview.md")" || return 2
+  if [[ -n "$missing" ]]; then printf '%s\n' "$missing" | sed 's/^/  MISSING CITATION  /'; fi
 }
 
 # Rewrites docs/FEATURES.md from every feature's overview.md.
@@ -125,7 +239,7 @@ write_index() { # $1 = repo
     echo "# Features"
     echo
     echo "> Generated by \`feature-docs.sh index\`. Edit the feature docs, not this file."
-    echo "> Each feature below has an as-built record in \`docs/<feature>/feature-docs/\`. Before changing one, read its \`decisions.md\`."
+    echo "> Read the overview for context, then decisions before changing behavior; tickets hold acceptance evidence and gaps."
     echo
     echo "| Feature | Summary | Updated |"
     echo "|---|---|---|"
@@ -159,87 +273,217 @@ cmd_new() {
   refresh_index "$repo"
 }
 
+write_map() { # section, TSV input, trailing comma
+  local count
+  count="$(wc -l < "$2" | tr -d ' ')"
+  if [[ "$count" -eq 0 ]]; then printf '  "%s": {}%s\n' "$1" "$3"; return; fi
+  printf '  "%s": {\n' "$1"
+  awk -F'\t' -v n="$count" '{ printf "    \"%s\": \"%s\"%s\n", $1, $2, (NR < n ? "," : "") }' "$2"
+  printf '  }%s\n' "$3"
+}
+
 cmd_stamp() {
-  local repo="${1:-}" slug="${2:-}" source="" dest manifest tmp count snap path
-  check_repo "$repo"
-  check_slug "$slug"
+  local repo="${1:-}" slug="${2:-}" source="" source_set=0 evidence_only=0 selected=0
+  local dest manifest old_source="" synced="" reviewed="$TODAY" version="" findings path digest
+  local same=0 snap="" staged="" backup="" count
+  local evidence=()
+  check_repo "$repo"; check_slug "$slug"
   shift 2
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --source) [[ $# -ge 2 && -n "$2" ]] || die "--source needs a directory"; source="$2"; shift 2 ;;
+      --source)
+        [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || die "--source needs a directory"
+        [[ "$source_set" -eq 0 ]] || die "--source may be supplied only once"
+        source="${2%/}"; safe_relative "$source"; source_set=1; shift 2 ;;
+      --evidence)
+        [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || die "--evidence needs a file"
+        safe_relative "$2"; evidence+=("$2"); selected=1; shift 2 ;;
+      --evidence-only) evidence_only=1; shift ;;
       *) die "unknown argument: $1" ;;
     esac
   done
-  dest="$repo/docs/$slug/feature-docs"
-  manifest="$dest/sources.json"
+  [[ "$source_set" -eq 0 || "$evidence_only" -eq 0 ]] || die "--source and --evidence-only cannot be combined"
+  dest="$repo/docs/$slug/feature-docs"; manifest="$dest/sources.json"
   [[ -d "$dest" ]] || die "no feature docs at docs/$slug/feature-docs (run: new $repo $slug)"
-  if [[ -z "$source" && -f "$manifest" ]]; then source="$(manifest_field "$manifest" source)"; fi
-  [[ -n "$source" ]] || source=".scratch/$slug"
-  source="${source%/}"
-  case "$source" in /*|..|../*|*/..|*/../*) die "--source must be a path inside the repo, relative to it: $source" ;; esac
-  case "$source" in *'"'*|*'\'*) die "unsupported character in source path: $source" ;; esac
-  [[ -d "$repo/$source" ]] || die "source directory not found: $repo/$source"
-
-  tmp="$(tmpfile)"
-  current_hashes "$repo/$source" > "$tmp" || { rm -f "$tmp"; exit 2; }
-  count="$(wc -l < "$tmp" | tr -d ' ')"
-  [[ "$count" -gt 0 ]] || { rm -f "$tmp"; die "no *.md files under $source"; }
-  {
-    printf '{\n  "source": "%s",\n  "synced": "%s",\n  "files": {\n' "$source" "$TODAY"
-    awk -F'\t' -v n="$count" '{ printf "    \"%s\": \"%s\"%s\n", $1, $2, (NR < n ? "," : "") }' "$tmp"
-    printf '  }\n}\n'
-  } > "$manifest"
-  if snap="$(snapshot_dir "$repo" "$slug")"; then
-    rm -rf "$snap"
-    while IFS=$'\t' read -r path _; do
-      mkdir -p "$snap/$(dirname "$path")"
-      cp "$repo/$source/$path" "$snap/$path"
-    done < "$tmp"
-  fi
-  rm -f "$tmp"
-  refresh_index "$repo"
-  echo "stamped  docs/$slug/feature-docs/sources.json ($(files "$count") from $source, synced $TODAY)"
-}
-
-# Prints one feature's state. Returns 1 when the docs are out of step, 0 otherwise.
-report() { # $1 = repo, $2 = slug
-  local repo="$1" slug="$2" dest manifest source="" synced="" changes="" count=0 state missing planned rc=0
-  dest="$repo/docs/$slug/feature-docs"
-  manifest="$dest/sources.json"
-  if [[ ! -f "$manifest" ]]; then
-    state=untracked
-  else
-    source="$(manifest_field "$manifest" source)"
+  contained_path "$repo" "docs/$slug/feature-docs" || die "feature docs directory is unavailable"
+  if [[ -e "$manifest" || -L "$manifest" ]]; then
+    contained_path "$repo" "docs/$slug/feature-docs/sources.json" || die "manifest is unavailable"
+    validate_manifest "$manifest" || exit 2
+    version="$(manifest_field "$manifest" version)"
+    old_source="$(manifest_field "$manifest" source)"
     synced="$(manifest_field "$manifest" synced)"
-    if [[ -z "$source" || ! -d "$repo/$source" ]]; then
-      state=nosource
-    else
-      changes="$(source_changes "$manifest" "$repo/$source")"
-      count="$(recorded_hashes "$manifest" | wc -l | tr -d ' ')"
-      if [[ -n "$changes" ]]; then state=drift; else state=sync; fi
+  fi
+  findings="$(structure_findings "$repo" "$slug")" || exit 2
+  if [[ -n "$findings" ]]; then printf '%s  CHECK FAILED\n%s\n' "$slug" "$findings"; exit 1; fi
+  if [[ "$selected" -eq 0 && "$version" != 2 ]]; then die "first reviewed stamp needs --evidence <repo-relative file> (repeat for code and tests)"; fi
+  WORK="$(mktemp -d "$dest/.stamp.XXXXXX")" || die "cannot stage manifest"
+  if [[ "$selected" -eq 1 ]]; then
+    printf '%s\n' "${evidence[@]}" | LC_ALL=C sort -u > "$WORK/paths"
+  else
+    recorded_hashes "$manifest" evidence | cut -f1 > "$WORK/paths" || die "cannot read evidence inventory"
+  fi
+  : > "$WORK/evidence"
+  while IFS= read -r path; do
+    safe_relative "$path"
+    contained_path "$repo" "$path" || die "evidence file is missing: $path"
+    [[ -f "$repo/$path" ]] || die "evidence must be a regular file, not a directory: $path"
+    [[ ! "$repo/$path" -ef "$manifest" ]] || die "sources.json cannot be its own evidence"
+    digest="$(hash_file "$repo/$path")" || die "cannot hash evidence: $path"
+    printf '%s\t%s\n' "$path" "$digest" >> "$WORK/evidence"
+  done < "$WORK/paths"
+  [[ -s "$WORK/evidence" ]] || die "reviewed evidence inventory must not be empty"
+  : > "$WORK/documents"
+  for path in decisions.md overview.md tickets.md; do
+    digest="$(hash_file "$dest/$path")" || die "cannot hash document: $path"
+    printf '%s\t%s\n' "$path" "$digest" >> "$WORK/documents"
+  done
+  : > "$WORK/files"
+  if [[ "$evidence_only" -eq 1 ]]; then
+    source="$old_source"
+    if [[ -n "$version" ]]; then recorded_hashes "$manifest" > "$WORK/files" || exit 2; fi
+  else
+    if [[ "$source_set" -eq 0 ]]; then
+      if [[ -n "$version" ]]; then source="$old_source"; else source=".scratch/$slug"; fi
+    fi
+    if [[ -n "$source" ]]; then
+      safe_relative "$source"
+      contained_path "$repo" "$source" || die "source directory unavailable: $source; use --evidence-only to preserve the previous source baseline"
+      [[ -d "$repo/$source" ]] || die "source is not a directory: $source"
+      current_hashes "$repo/$source" "$repo" > "$WORK/files" || die "cannot hash sources"
+      [[ -s "$WORK/files" ]] || die "no *.md files under $source"
+      synced="$TODAY"
+      if [[ -n "$version" && "$source" == "$old_source" ]]; then
+        recorded_hashes "$manifest" > "$WORK/old-files" || exit 2
+        if cmp -s "$WORK/files" "$WORK/old-files"; then synced="$(manifest_field "$manifest" synced)"; fi
+      fi
+    else synced=""; fi
+  fi
+  if [[ "$version" == 2 && "$source" == "$old_source" ]]; then
+    recorded_hashes "$manifest" > "$WORK/old-files" || exit 2
+    recorded_hashes "$manifest" documents > "$WORK/old-documents" || exit 2
+    recorded_hashes "$manifest" evidence > "$WORK/old-evidence" || exit 2
+    if cmp -s "$WORK/files" "$WORK/old-files" && cmp -s "$WORK/documents" "$WORK/old-documents" && cmp -s "$WORK/evidence" "$WORK/old-evidence"; then
+      same=1; reviewed="$(manifest_field "$manifest" reviewed)"
     fi
   fi
-  missing="$(missing_citations "$repo" "$dest/overview.md")"
-  planned="$(planned_tickets "$dest/tickets.md")"
+  {
+    printf '{\n  "version": 2,\n'
+    if [[ -n "$source" ]]; then printf '  "source": "%s",\n  "synced": "%s",\n' "$source" "$synced"
+    else printf '  "source": null,\n  "synced": null,\n'; fi
+    write_map files "$WORK/files" ','
+    printf '  "reviewed": "%s",\n' "$reviewed"
+    write_map documents "$WORK/documents" ','
+    write_map evidence "$WORK/evidence" ''
+    printf '}\n'
+  } > "$WORK/manifest" || die "cannot write staged manifest"
+  validate_manifest "$WORK/manifest" || exit 2
+  if [[ "$same" -eq 1 ]]; then
+    echo "unchanged  docs/$slug/feature-docs/sources.json (recorded inputs match; no dates changed)"
+    return
+  fi
+  # Prepare every private source copy before touching the last good baseline.
+  if [[ "$evidence_only" -eq 0 && -n "$source" ]] && snap="$(snapshot_dir "$repo" "$slug")"; then
+    mkdir -p "$(dirname "$snap")" || die "cannot create snapshot directory"
+    staged="$(mktemp -d "$(dirname "$snap")/.$slug.XXXXXX")" || die "cannot stage sources"
+    while IFS=$'\t' read -r path digest; do
+      if ! mkdir -p "$staged/$(dirname "$path")" || ! cp "$repo/$source/$path" "$staged/$path" ||
+          [[ "$(hash_file "$staged/$path")" != "$digest" ]]; then
+        rm -rf "$staged"; die "source changed or could not be copied: $path"
+      fi
+    done < "$WORK/files"
+    if [[ -e "$snap" ]]; then
+      backup="$staged.previous"
+      mv "$snap" "$backup" || { rm -rf "$staged"; die "cannot preserve previous source snapshot"; }
+    fi
+    if ! mv "$staged" "$snap"; then
+      [[ -z "$backup" ]] || mv "$backup" "$snap"
+      rm -rf "$staged"; die "cannot install source snapshot"
+    fi
+  fi
+  if ! mv "$WORK/manifest" "$manifest"; then
+    if [[ -n "$staged" ]]; then rm -rf "$snap"; [[ -z "$backup" ]] || mv "$backup" "$snap"; fi
+    die "cannot replace sources.json"
+  fi
+  [[ -z "$backup" ]] || rm -rf "$backup"
+  refresh_index "$repo" || die "stamp saved, but index refresh failed"
+  count="$(wc -l < "$WORK/evidence" | tr -d ' ')"
+  echo "stamped  docs/$slug/feature-docs/sources.json ($(files "$count") reviewed; hashes do not prove tests passed)"
+  if [[ "$evidence_only" -eq 1 && -n "$source" ]]; then echo "  source baseline preserved from $synced: $source"; fi
+  sed 's/^/  EVIDENCE  /' "$WORK/paths"
+}
 
-  case "$state" in
-    untracked) echo "$slug  UNTRACKED  no sources.json (converted or hand-written; nothing to sync from)" ;;
-    nosource) echo "$slug  SOURCE MISSING  ${source:-<unrecorded>} is not on this machine; the feature docs are the record (last synced $synced)" ;;
-    drift) echo "$slug  DRIFT  $source changed since $synced"; rc=1 ;;
-    sync)
-      if [[ -n "$missing" ]]; then echo "$slug  STALE  $source is unchanged since $synced, but the docs cite files that are gone"
-      else echo "$slug  IN SYNC  $(files "$count") in $source, last synced $synced"; fi ;;
-  esac
-  if [[ -n "$changes" ]]; then echo "$changes" | awk -F'\t' '{ printf "  %-8s %s\n", $2, $1 }'; fi
-  if [[ -n "$missing" ]]; then rc=1; echo "$missing" | sed 's/^/  MISSING  /; s/$/ (cited in overview.md)/'; fi
-  if [[ -n "$planned" ]]; then echo "$planned" | sed 's/^/  PLANNED  /'; fi
+report() { # repo, slug, quiet, check|status
+  local repo="$1" slug="$2" quiet="$3" mode="$4" dest manifest findings rc=0 version="" source="" changes=""
+  local path old digest kind prefix exists missing_source=0 reminders
+  dest="$repo/docs/$slug/feature-docs"; manifest="$dest/sources.json"
+  contained_path "$repo" "docs/$slug/feature-docs" || return 2
+  if [[ -e "$manifest" || -L "$manifest" ]]; then
+    contained_path "$repo" "docs/$slug/feature-docs/sources.json" || return 2
+    validate_manifest "$manifest" || return 2
+    version="$(manifest_field "$manifest" version)" || return 2
+  fi
+  findings="$(structure_findings "$repo" "$slug")" || return 2
+  if [[ -n "$findings" ]]; then printf '%s  CHECK FAILED\n%s\n' "$slug" "$findings"; rc=1; fi
+  if [[ "$mode" == check ]]; then
+    if [[ "$rc" -eq 0 && "$quiet" -eq 0 ]]; then echo "$slug  CHECK OK  structure and current citations only"; fi
+    return "$rc"
+  fi
+  if [[ -z "$version" ]]; then
+    echo "$slug  REVIEW REQUIRED  no sources.json; no reviewed evidence baseline"; rc=1
+  else
+    source="$(manifest_field "$manifest" source)" || return 2
+    if [[ -n "$source" ]]; then
+      exists=0; contained_path "$repo" "$source" || exists=$?
+      [[ "$exists" -ne 2 ]] || return 2
+      if [[ "$exists" -ne 0 || ! -d "$repo/$source" ]]; then
+        missing_source=1
+        if [[ "$quiet" -eq 0 ]]; then echo "$slug  SOURCE MISSING  $source is not on this machine; available docs and evidence are still checked"; fi
+      else
+        changes="$(source_changes "$manifest" "$repo/$source" "$repo")" || return 2
+        if [[ -n "$changes" ]]; then
+          echo "$slug  SOURCE DRIFT  $source changed since $(manifest_field "$manifest" synced)"
+          printf '%s\n' "$changes" | awk -F'\t' '{ printf "  %-8s %s\n", $2, $1 }'; rc=1
+        fi
+      fi
+    fi
+    if [[ "$version" == 1 ]]; then
+      echo "$slug  REVIEW REQUIRED  legacy source hashes contain no document or code/test review baseline"; rc=1
+    else
+      for kind in documents evidence; do
+        prefix=""; [[ "$kind" != documents ]] || prefix="docs/$slug/feature-docs/"
+        changes="$(recorded_hashes "$manifest" "$kind")" || return 2
+        while IFS=$'\t' read -r path old; do
+          exists=0; contained_path "$repo" "$prefix$path" || exists=$?
+          [[ "$exists" -ne 2 ]] || return 2
+          if [[ "$exists" -ne 0 || ! -f "$repo/$prefix$path" ]]; then
+            if [[ "$kind" == documents ]]; then echo "$slug  DOCS MISSING  $path"; else echo "$slug  EVIDENCE MISSING  $path"; fi
+            rc=1
+          else
+            digest="$(hash_file "$repo/$prefix$path")" || return 2
+            if [[ "$digest" != "$old" ]]; then
+              if [[ "$kind" == documents ]]; then echo "$slug  DOCS CHANGED  $path"; else echo "$slug  EVIDENCE CHANGED  $path"; fi
+              rc=1
+            fi
+          fi
+        done <<< "$changes"
+      done
+      if [[ "$rc" -eq 0 && "$quiet" -eq 0 ]]; then
+        if [[ "$missing_source" -eq 1 ]]; then echo "$slug  REVIEWED FILES MATCH  local source availability is separate"
+        else echo "$slug  IN SYNC  recorded documents and reviewed files match (not semantic or runtime verification)"; fi
+      fi
+    fi
+  fi
+  if [[ "$quiet" -eq 0 ]]; then
+    reminders="$(ticket_reminders "$dest/tickets.md")" || return 2
+    [[ -z "$reminders" ]] || printf '%s\n' "$reminders" | sed 's/^/  /'
+  fi
   return "$rc"
 }
 
-cmd_status() {
-  local repo="${1:-}" slug="" quiet=0 out_of_step=0 found=0 dir name sources src out rc lines=""
-  check_repo "$repo"
+scan() { # check|status, then CLI args
+  local mode="$1" repo="${2:-}" slug="" quiet=0 result=0 found=0 dir name out rc sources="" src
   shift
+  check_repo "$repo"; shift
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --quiet) quiet=1 ;;
@@ -251,60 +495,63 @@ cmd_status() {
   if [[ -n "$slug" ]]; then
     check_slug "$slug"
     [[ -d "$repo/docs/$slug/feature-docs" ]] || die "no feature docs at docs/$slug/feature-docs"
-    rc=0; out="$(report "$repo" "$slug")" || rc=$?
-    if [[ "$rc" -ne 0 ]]; then out_of_step=1; fi
-    if [[ "$quiet" -eq 0 || "$rc" -ne 0 ]]; then lines="$out"$'\n'; fi
+    report "$repo" "$slug" "$quiet" "$mode" || result=$?
   else
-    sources=""
     for dir in "$repo"/docs/*/feature-docs; do
       [[ -d "$dir" ]] || continue
-      found=1
-      name="$(basename "$(dirname "$dir")")"
-      rc=0; out="$(report "$repo" "$name")" || rc=$?
-      if [[ "$rc" -ne 0 ]]; then out_of_step=1; fi
-      if [[ "$quiet" -eq 0 || "$rc" -ne 0 ]]; then lines="$lines$out"$'\n'; fi
-      if [[ -f "$dir/sources.json" ]]; then sources="$sources$(manifest_field "$dir/sources.json" source)"$'\n'; fi
+      found=1; name="$(basename "$(dirname "$dir")")"; check_slug "$name"
+      rc=0; report "$repo" "$name" "$quiet" "$mode" || rc=$?
+      if [[ "$rc" -gt "$result" ]]; then result="$rc"; fi
+      if [[ "$rc" -ne 2 && -f "$dir/sources.json" ]]; then
+        src="$(manifest_field "$dir/sources.json" source)" || return 2
+        sources="$sources$src"$'\n'
+      fi
     done
     if [[ "$quiet" -eq 0 ]]; then
-      if [[ "$found" -eq 0 ]]; then lines="no feature docs under docs/*/feature-docs"$'\n'; fi
-      # Source folders nothing was written from yet: a hint, since they may not be implemented.
-      for dir in "$repo"/.scratch/*/; do
-        [[ -d "$dir" ]] || continue
-        src=".scratch/$(basename "$dir")"
-        printf '%s' "$sources" | grep -Fxq -- "$src" || lines="$lines$(basename "$dir")  NO DOCS  $src has no feature docs"$'\n'
-      done
+      [[ "$found" -ne 0 ]] || echo 'no feature docs under docs/*/feature-docs'
+      if [[ "$mode" == status ]]; then
+        for dir in "$repo"/.scratch/*/; do
+          [[ -d "$dir" ]] || continue
+          src=".scratch/$(basename "$dir")"
+          if ! printf '%s' "$sources" | grep -Fxq -- "$src"; then echo "$(basename "$dir")  NO DOCS  $src has no recorded source baseline"; fi
+        done
+      fi
     fi
   fi
-  if [[ "$quiet" -eq 1 && "$out_of_step" -eq 1 ]]; then
-    echo 'Feature docs are out of step with their sources or the code. Sync them with the feature-docs skill ("sync the feature docs"):'
-  fi
-  printf '%s' "$lines"
-  exit "$out_of_step"
+  return "$result"
 }
 
+cmd_status() { scan status "$@"; }
+cmd_check() { scan check "$@"; }
+
 cmd_diff() {
-  local repo="${1:-}" slug="${2:-}" manifest source changes snap="" path kind
+  local repo="${1:-}" slug="${2:-}" manifest source changes snap="" path kind expected
   check_repo "$repo"
   check_slug "$slug"
   manifest="$repo/docs/$slug/feature-docs/sources.json"
   [[ -f "$manifest" ]] || die "docs/$slug/feature-docs has no sources.json, so there is no synced state to compare with"
+  contained_path "$repo" "docs/$slug/feature-docs/sources.json" || die "manifest is unavailable"
+  validate_manifest "$manifest" || exit 2
   source="$(manifest_field "$manifest" source)"
-  [[ -n "$source" && -d "$repo/$source" ]] || die "source ${source:-<unrecorded>} is not on this machine"
-  changes="$(source_changes "$manifest" "$repo/$source")"
-  if [[ -z "$changes" ]]; then echo "$slug  IN SYNC  nothing changed in $source"; exit 0; fi
+  if [[ -z "$source" ]]; then echo "$slug  NO SOURCE TRACKED  use status for reviewed document and evidence checks"; return; fi
+  contained_path "$repo" "$source" || die "source $source is unavailable on this machine"
+  [[ -d "$repo/$source" ]] || die "source ${source:-<unrecorded>} is not on this machine"
+  changes="$(source_changes "$manifest" "$repo/$source" "$repo")"
+  if [[ -z "$changes" ]]; then echo "$slug  SOURCES UNCHANGED  nothing changed in $source; use status for document and evidence checks"; exit 0; fi
   snap="$(snapshot_dir "$repo" "$slug")" || snap=""
   while IFS=$'\t' read -r path kind; do
+    expected="$(recorded_hashes "$manifest" | awk -F'\t' -v path="$path" '$1 == path { print $2 }')"
     case "$kind" in
       ADDED) echo "ADDED    $source/$path (new file: read it in full)" ;;
       CHANGED)
-        if [[ -n "$snap" && -f "$snap/$path" ]]; then
+        if [[ -n "$snap" && -f "$snap/$path" && ! -L "$snap/$path" && "$(hash_file "$snap/$path")" == "$expected" ]]; then
           echo "CHANGED  $source/$path"
           diff -u -L "synced/$path" -L "current/$path" "$snap/$path" "$repo/$source/$path" || true
         else
           echo "CHANGED  $source/$path (no copy of the synced version on this machine: read it in full)"
         fi ;;
       REMOVED)
-        if [[ -n "$snap" && -f "$snap/$path" ]]; then
+        if [[ -n "$snap" && -f "$snap/$path" && ! -L "$snap/$path" && "$(hash_file "$snap/$path")" == "$expected" ]]; then
           echo "REMOVED  $source/$path, which said:"
           sed 's/^/  | /' "$snap/$path"
         else
@@ -351,7 +598,7 @@ cmd_setup() {
     cat <<'EOF'
 ## Feature docs
 
-Built features are recorded in `docs/<feature>/feature-docs/`; `docs/FEATURES.md` lists them. Before speccing, ticketing or changing a listed feature, read its `decisions.md` and cite the decision IDs the change builds on or overturns. Write, convert and sync these docs with the `feature-docs` skill.
+Features are recorded in `docs/<feature>/feature-docs/`; `docs/FEATURES.md` lists them. Read the overview for context, then decisions before speccing, ticketing or changing behavior. Cite the decision IDs the change builds on or overturns. Read tickets for acceptance evidence and remaining gaps. Write, convert and sync these docs with the `feature-docs` skill.
 EOF
   } >> "$target"
   echo "added    Feature docs section to $file"
@@ -385,6 +632,7 @@ EOF
 case "${1:-}" in
   new) shift; cmd_new "$@" ;;
   stamp) shift; cmd_stamp "$@" ;;
+  check) shift; cmd_check "$@" ;;
   status) shift; cmd_status "$@" ;;
   diff) shift; cmd_diff "$@" ;;
   index) shift; cmd_index "$@" ;;

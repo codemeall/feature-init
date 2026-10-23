@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-23 — 2.0.0: evidence-backed feature records
+
+This is a major release because first stamps now require explicit evidence files, incomplete documents cannot be stamped, and legacy source-only records return `REVIEW REQUIRED` (exit 1) until reviewed. Existing manifests remain readable; see [Upgrading existing records](./USAGE.md#upgrading-existing-records) for migration.
+
+- Separate inspected implementation, passing tests, and runtime verification. Record partial delivery, unknown rationale, and intent/code conflicts explicitly; source deletion alone no longer withdraws work.
+- Interpret local tracker comments, maps, and typed research/prototype answers as sources of durable conclusions. Preserve the three human documents and use concise references for future sessions.
+- Add structural `check` and a version-2 manifest tracking source, document, and explicitly selected evidence hashes. Code-only changes can require review even when paths and scratch sources are unchanged.
+- Keep unversioned source manifests readable. First version-2 stamps require `--evidence` files; later stamps reuse the selection. `--evidence-only` supports fresh clones and source-free conversions without inventing a source-sync date.
+- Validate before replacing the baseline, distinguish operational errors from drift, and retain nonblocking hooks. Source-only `diff` reports `SOURCES UNCHANGED` instead of implying whole-feature freshness.
+- Expand regressions for incomplete records, migration, fresh clones, changed evidence, and unchanged repeated operations.
+- Preserve safe legacy source-path spellings during migration, and exclude Git metadata/generated feature docs from source scans to prevent recursive snapshot drift.
+
 ## 2026-10-07 — 1.0.1: sources from a Fleet run
 
 - WRITE names a Fleet run's worker reports and evidence files as inputs for the Testing section and the delivery dates, and dates a Fleet-delivered ticket from `verified_at` in `fleet resume <run> --json`. They are writing inputs, not tracked sources: `stamp` still hashes only `.scratch/<feature>`.

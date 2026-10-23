@@ -1,32 +1,30 @@
-# One-time setup in a repo
+# Retrieval setup
 
-Three optional pieces that keep feature docs in use after the session that wrote them. Offer them once, when the repo has feature docs and no `docs/FEATURES.md`. Each changes a file outside `docs/<feature>/feature-docs/`, so say what it will touch and wait for the user's yes.
+Use this optional setup when feature docs exist but future sessions have no reliable route to them. Apply pieces the user has authorized; otherwise offer the relevant changes with their paths. Existing authorization does not need another confirmation.
 
-## 1. The index and the pointer
+## Index and agent pointer
 
 ```bash
 bash scripts/feature-docs.sh setup <repo>
 ```
 
-- Writes `docs/FEATURES.md`: one line per feature from its `Summary:` and `Updated:`. `new` and `stamp` rewrite it from then on.
-- Appends a three-line "Feature docs" section to `CLAUDE.md`, or to `AGENTS.md` when there is no `CLAUDE.md`. That section is what makes a later agent read `decisions.md` before changing a feature, without anyone asking.
-- With neither file present it stops and asks for `--file CLAUDE.md` or `--file AGENTS.md`. Ask the user which one; do not pick.
+This creates `docs/FEATURES.md` from each overview's Summary and Updated metadata. Subsequent `new` and `stamp` commands refresh an existing index. It also adds a Feature docs pointer to `CLAUDE.md`, or `AGENTS.md` when no `CLAUDE.md` exists. With neither present, specify `--file CLAUDE.md` or `--file AGENTS.md` according to the repository's chosen agent convention; clarify only when that choice is unresolved.
 
-Running it again is safe: the index is regenerated and an existing section is left alone.
+The pointer should route a later session through the index to the relevant overview, then decisions before changing behavior and tickets for acceptance evidence or unfinished work. It names the condition for reading the docs rather than restating the workflow. Check the installed pointer for accuracy; an existing section is preserved when setup runs again.
 
-## 2. A warning before each commit
+## Commit notice
 
 ```bash
 bash scripts/feature-docs.sh hook <repo>
 ```
 
-Installs a `pre-commit` hook that runs `status --quiet` and prints the features that are out of step. It always exits 0, so it never blocks a commit. The hook is local to this checkout and records the path of this copy of the skill; rerun `hook` after moving or reinstalling the skill.
+This installs a local pre-commit notice running `status --quiet`. It always exits 0. When a pre-commit hook already exists, the command prints an integration line instead of replacing it. The installed hook records this skill's path; rerun installation after moving the skill.
 
-When the repo already has a `pre-commit` hook, the command refuses and prints the one line to add to it. Show that line to the user instead of editing their hook.
+Status compares recorded sources, documents and selected evidence, and checks citations. It cannot prove semantic correctness or runtime behavior. Planned/partial tickets are reminders, not drift failures.
 
-## 3. A notice at the start of each Claude Code session
+## Claude Code session notice
 
-For Claude Code, a `SessionStart` hook puts the same report into the agent's context, so drift is noticed before any work starts. Add it to the repo's `.claude/settings.json` (or `.claude/settings.local.json` to keep it out of git), with the real path of this skill's script:
+When requested, merge a SessionStart hook into the repo's existing `.claude/settings.json`, or `.claude/settings.local.json` for a local-only setting. Replace the skill path:
 
 ```json
 {
@@ -45,4 +43,4 @@ For Claude Code, a `SessionStart` hook puts the same report into the agent's con
 }
 ```
 
-Merge it into any hooks already in that file. `--quiet` prints nothing when every feature is in sync, so a healthy repo adds nothing to the context.
+Keep existing hooks. A clean mechanical status suppresses routine output; the notice is a retrieval aid, not an instruction to rewrite unchanged documents or refresh dates.

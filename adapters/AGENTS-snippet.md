@@ -20,13 +20,9 @@ decisions.md, tickets.md, sources.json). To write, convert or sync feature docs,
 
 (clone from https://github.com/codemeall/feature-init if missing)
 
-If you read nothing else:
-- Before speccing or changing a feature, read its `decisions.md` and cite the decision IDs the
-  change builds on or overturns.
-- After a feature is implemented, write its feature docs from the spec, the tickets and the
-  code. "What was built" rows cite a real file; work the code does not show is "Not built yet".
-- When `.scratch/<feature>/` changes, run
-  `bash <clone-path>/skills/feature-docs/scripts/feature-docs.sh status .` and update the
-  rows for the files it names.
-- Superseded decisions and withdrawn tickets keep their rows.
+Before speccing or changing a documented feature, use `docs/FEATURES.md` to find its overview
+and decisions; cite the decision IDs the change builds on or overturns. Consult tickets for
+acceptance evidence and remaining work. After implementation or a change to sources, code, or
+docs, follow the skill's WRITE or SYNC workflow. Structural checks and matching hashes do not
+prove test execution or runtime correctness. Preserve decision IDs and delivery history.
 ```

@@ -1,89 +1,75 @@
 ---
 name: feature-docs
 description: >-
-  Use when a feature has just been implemented from a local spec and tickets and needs a tracked
-  record, when the user points at existing docs to turn into feature docs, when a spec or ticket
-  under .scratch/ changed after its feature docs were written, when feature docs cite code that
-  moved, or before speccing, ticketing or changing a feature that already has
-  docs/<feature>/feature-docs/. Phrases: "write the feature docs", "document this feature",
-  "convert these docs", "sync the feature docs", "what did we decide about X".
+  Write tracked feature records after full or partial implementation, convert existing docs,
+  reconcile changed sources or implementation evidence, or look up decisions before changing
+  a documented feature.
 ---
 
 # feature-docs
 
-`to-spec` and `to-tickets` write the spec and tickets to `.scratch/<feature>/`, which is local and untracked. **Feature docs** are the tracked counterpart: `docs/<feature>/feature-docs/`, written once the feature is built. They are an **as-built** record. The spec says what was intended; feature docs say what the code shows and why, for the agent or teammate who will never see `.scratch/`.
+Feature docs preserve what a feature does, why choices were made, and what remains unverified for a reader without the original conversation. The local-markdown configuration of Matt Pocock's skills uses `.scratch/<feature>/`; consult `docs/agents/issue-tracker.md` when present rather than assuming every tracker uses local files.
 
-| File | Holds |
+Write three human documents under `docs/<feature>/feature-docs/`:
+
+| File | Owns |
 |---|---|
-| `overview.md` | Summary, problem, solution, what was built (each capability cites a file), testing, out of scope, not built yet |
-| `decisions.md` | Every significant choice: why, alternative rejected, source, status, date |
-| `tickets.md` | The slices delivered, with their acceptance criteria |
-| `sources.json` | Hashes of the source files at the last sync. The script writes it; you never do |
+| `overview.md` | User problem, current capabilities, contracts, navigation and verification summary |
+| `decisions.md` | Choices, recorded reasons, rejected alternatives and unresolved intent conflicts |
+| `tickets.md` | Delivery slices, acceptance criteria, evidence and remaining checks |
+| `sources.json` | Script-owned source, document and evidence baselines; never hand-edit |
 
-`<feature>` is the `.scratch/<feature>/` slug. The script is `bash scripts/feature-docs.sh`; `--help` lists its commands. A filled set of the three docs is in `references/example.md`; read it when you are unsure what a finished row looks like.
+One fact has one home; other files link to it by decision/ticket ID. Remove template writing instructions from finished docs; retain useful navigation and status legends. Use the local feature slug. The script is `bash scripts/feature-docs.sh`; read `--help` for command syntax. Read `references/example.md` when an evidence row or finished document is unclear.
+
+## Evidence and decisions
+
+**Code inspected** supports only what the opened file/symbol demonstrates. **Test passed** requires an actual result, command, scope and date. **Runtime verified** requires an observed scenario, environment and date. Inherited results name their source and say **not rerun**. A test file is code evidence, not a passing result. Mark unsupported claims **unverified**, with the check still needed.
+
+Acceptance criteria determine suitable evidence: inspection may establish a static contract; a performance limit needs measurement. Source triage labels and discovery `resolved` states are not delivery evidence. Ticket states and decision states are defined in their templates.
+
+Code establishes observed implementation; explicit agreements establish accepted intent. Keep a discrepancy visible until resolved. Record undocumented rationale as **Not recorded** and unknown historical dates as **Unknown**. An observed implementation choice is **Observed**, not automatically **Accepted**. A source's disappearance changes provenance; withdrawal requires evidence of cancellation. Preserve superseded decisions and withdrawn tickets.
 
 ## Pick the mode
 
-- The feature's tickets are implemented and verified, and it has no feature docs → **WRITE**
-- The user points at existing docs, in any folder or format → **CONVERT**
-- The spec or tickets changed, cited code moved, the user says "sync", or a run is finishing on a feature that already has feature docs → **SYNC**
-- You are about to spec, ticket or change a feature that has feature docs → **LOOKUP**
+- Full or partial implementation needs its first record → **WRITE**.
+- The user points at existing documentation → **CONVERT**.
+- Sources, implementation or evidence changed, or the user requests reconciliation → **SYNC**.
+- Before speccing, ticketing or changing a documented feature → **LOOKUP**.
 
-A change to a documented feature goes into its existing folder as new rows. A fix that changes no decision and no capability needs no doc change.
+Use the existing feature folder for later changes. A fix affecting no documented claim needs no content edit. When the repo lacks `docs/FEATURES.md`, offer the optional retrieval setup in `references/setup.md` after writing the first record.
 
-When the repo has no `docs/FEATURES.md`, finish the first WRITE or CONVERT by offering the one-time setup in `references/setup.md`. It makes later sessions find these docs unprompted.
+## WRITE
 
-## WRITE — after implementation
+1. Read the spec, tickets including comments, and relevant build decisions. For `map.md`, typed discovery tickets, research/prototype answers or Fleet evidence, read `references/sources.md`. Classify inputs before mapping them: an answered research question is not a shipped capability.
+2. Run `new <repo> <feature>`. Read implementation and available verification evidence until every delivery criterion has an evidence assessment or an explicit gap. Preserve only durable conclusions from discovery.
+3. Fill the templates. Aim for a 300–600-word overview without padding; complex features may need more. Cite repository-relative files actually inspected. Put acceptance detail in tickets and rationale in decisions; overview gaps link to those IDs. Record significant agreed choices and meaningful deviations, not every incidental implementation detail.
+4. Run `check <repo> <feature>` and resolve its structural findings. Review the claims yourself: the command cannot establish semantic truth.
+5. Run `stamp <repo> <feature> --evidence <file> ...` with the implementation, test or configuration files inspected to support the record. The first version-2 stamp requires a nonempty explicit list; each `--evidence` names one file. Later omission reuses the recorded list; supplying a list replaces it. Source documents are tracked separately. Use `--source <dir>` for a different local source folder, or `--evidence-only` for conversion without one.
+6. Report written files, partial/planned work, verification gaps and glossary/ADR candidates. Stamping records reviewed baselines; it does not validate behavior.
 
-1. Find the sources: `.scratch/<feature>/spec.md`, every file in `.scratch/<feature>/issues/`, and the decisions made while building. For a Fleet run, `.fleet/runs/<run>/` holds `notes.md` and the plan's `decisions`, plus the worker reports and the lead's evidence files, which feed the Testing section and the delivery dates. Those are inputs for writing, not tracked sources: `stamp` hashes only `.scratch/<feature>`.
-2. Run `bash scripts/feature-docs.sh new <repo> <feature>`.
-3. Read every source end to end, then open the code behind each ticket. This step is done when every ticket has a file that proves it or is headed for "Not built yet".
-4. Fill `overview.md`, starting with the one-sentence `Summary:`. Condense the spec's user stories into the "What was built" rows, one per capability, each citing a file you opened. Write paths from the repo root, including the package or submodule folder (`apps/web/src/export.ts`). The spec leaves paths out because they go stale before the code exists; here they are the evidence, and `status` checks them.
-5. Fill `decisions.md`: one row for every item in the spec's Implementation Decisions and Testing Decisions, every decision made during the build, and every place the code departs from the spec (source `as-built`).
-6. Fill `tickets.md`: one row and one criteria block per issue file. `delivered` only where the code shows it. The date is when it was delivered: from the ticket, the decision record or the commit, or for a Fleet run the day the lead accepted it (`verified_at` in `fleet resume <run> --json`; the evidence file's date on older runs).
-7. Run `bash scripts/feature-docs.sh stamp <repo> <feature>`, then report the files written, everything under "Not built yet", and any glossary or ADR candidates. The user commits the folder with the code.
+## SYNC
 
-## SYNC — the docs are out of step
+1. Run `status <repo> [<feature>]`. Distinguish source, document and evidence drift, missing files, legacy **REVIEW REQUIRED**, and planned/partial reminders. Matching baselines are mechanical checks, not proof of correctness. An explicit reconciliation request or known implementation change still warrants review.
+2. Read changed sources and affected evidence, using `diff` for source changes. Reconcile changed claims in their owning files. Comments may revise an agreement; chronology alone does not establish approval. Keep unresolved contradictions attributed. For moved code, verify the replacement path and update citations. Removal alone supplies neither a reason nor cancellation.
+3. Reassess affected criteria, including partial/planned tickets. Update implementation and verification independently. A new accepted choice gets a new decision ID; supersede the earlier accepted choice only when replacement is established.
+4. Run `check`. Update `Updated:` only when document content changes. Stamp after reconciliation when a baseline changes; supply the complete evidence list if membership changed. With missing local sources, use `--evidence-only` to retain the last source baseline while updating documents/evidence. A source-free conversion remains source-free on later stamps.
+5. Report reconciled changes and unresolved gaps. If neither content nor baselines changed, leave dates and stamps untouched. Missing scratch material is not a reason to discard the tracked record.
 
-1. Run `bash scripts/feature-docs.sh status <repo> [<feature>]`. `IN SYNC` with no lines beneath it means stop and say so. `SOURCE MISSING` means the spec is on another machine and the feature docs are the record; only `MISSING` and `PLANNED` lines need work then.
-2. On `DRIFT`, run `bash scripts/feature-docs.sh diff <repo> <feature>` for the changed lines, and reconcile each file:
-   - `spec.md` → `overview.md` and `decisions.md`. A changed decision is a new row, and the old row's status becomes `Superseded by D<n>`.
-   - `issues/NN-*.md` → that ticket's row and criteria in `tickets.md`. `ADDED` is a new row. `REMOVED` becomes `withdrawn` with its reason; ask the user when the sources give none.
-3. For each `MISSING` path, the code moved or was removed without a spec change. `git log -1 -- <path>` names the commit. Moved: correct the path. Removed: take the row out of "What was built" and add an `as-built` decision row saying what was removed and why.
-4. For each `PLANNED` ticket, and for every change from step 2, check the code. Work the code shows is `delivered` and joins "What was built"; work it does not show stays `planned` under "Not built yet".
-5. Set `Updated:` to today, run `stamp` when the feature has a `sources.json`, and report what changed in each file. Sync is done when `status` prints no `DRIFT`, `STALE` or `MISSING`.
+## CONVERT
 
-Sync runs one way, from the sources and the code into the feature docs. Corrections made directly in the feature docs stay.
+1. Read the supplied material and `references/convert.md`. Use one folder per feature; resolve genuinely ambiguous feature boundaries before writing.
+2. Run `new`, map content into the three files, and check claims against appropriate evidence. Preserve relevant proposed choices and conflicts. Mark claims the available material cannot settle as unverified.
+3. Record origins on the overview's `Source:` line. Run `check`, then stamp with explicit evidence and a continuing local source folder, or `--evidence-only` when none exists.
+4. Leave originals in place. Report their paths and any agent pointers needing repointing; remove originals only with authorization.
 
-## CONVERT — existing docs become feature docs
+## LOOKUP
 
-1. Read everything the user pointed at, end to end.
-2. Name the features. One folder per feature; when the material covers several, propose the split and confirm it with the user before writing.
-3. Run `new` for each feature and map the material into the three files. `references/convert.md` has the mapping for the common inputs (the old `feature.md` / `plan.md` / `progress.md` folders, loose notes, a bare `.scratch` spec).
-4. Check each claim against the code: cite the file when it holds, record what the code shows when it differs, and mark the claim `unverified` when nothing in the repo can settle it.
-5. Write the origin on the `Source:` line of `overview.md`. Run `stamp` only when the origin is a local source folder that will keep changing, with `--source <dir>` when it is somewhere other than `.scratch/<feature>`.
-6. Run `status` to confirm every cited path exists. Leave the originals where they are: list them and ask the user whether to delete them now that the feature docs supersede them.
-
-## LOOKUP — before changing a documented feature
-
-1. Read `docs/FEATURES.md`, or list `docs/*/feature-docs/` when there is no index, and pick the features the work touches.
-2. Read `decisions.md`, then `overview.md`.
-3. Carry the decisions forward by ID in the new spec or ticket: "builds on D3", "supersedes D5". Raise a decision you want to overturn with the user; it changes in the feature docs through SYNC, after the new spec says so.
+1. Read `docs/FEATURES.md`, or list `docs/*/feature-docs/`, and select the affected feature.
+2. Read its overview for context, then decisions before proposing changes. Read tickets for relevant criteria, evidence and unfinished work.
+3. Cite decisions in the new spec/ticket: “builds on D3” or “proposes to supersede D5.” Preserve current accepted intent until an approved change replaces it; reconcile the record through SYNC.
 
 ## Glossary and ADRs
 
-Find the repo's glossary and ADR folder from `docs/agents/domain.md` when it exists; otherwise look for `CONTEXT.md` or `GLOSSARY.md` at the root and for `docs/adr/`.
+Find domain conventions through `docs/agents/domain.md`; otherwise check the root glossary and `docs/adr/`. Use established terms. Cite existing ADRs instead of duplicating their reasoning; an ADR remains authoritative for the decision it governs. Flag contradictions rather than silently erasing either source.
 
-- Name things with the glossary's terms. A term the feature introduced that the glossary lacks is a **glossary candidate**.
-- A decision already recorded elsewhere, in an ADR or in another feature's decision table, is one row that cites it (`ADR-0007`, source `ADR`). The reasoning stays where it is, and that record is the authority when the two differ.
-- A decision that binds other features (a shared contract, a convention, a technology choice) is an **ADR candidate**. Keep its row.
-
-Name the candidates in your report. The user records them through their own glossary and ADR process.
-
-## Rules
-
-1. **As-built.** "What was built" and `delivered` come from the code. Decisions come from the sources and the conversation.
-2. **One fact, one file.** Cross-reference between the three docs, and cite an ADR instead of restating it.
-3. **Rows stay.** Superseded decisions and withdrawn tickets keep their rows, so a later reader sees what was tried.
-4. **Absolute dates.** The docs outlive the session.
-5. **Tables over prose.** One line of rationale per decision; expand only the contested ones.
+Report new domain terms as glossary candidates and cross-feature contracts or conventions as ADR candidates. Keep feature-local records concise; use the repo's existing process for promotion.

@@ -1,137 +1,114 @@
-# A filled set of feature docs
+# A compact evidence-aware record
 
-An invented feature, `csv-export`, written from `.scratch/csv-export/spec.md` and three ticket files. It shows the level of detail to aim for. The second half shows the same docs after a sync.
+This invented `csv-export` example has two delivery tickets and one resolved prototype. Source comments report an earlier passing test; the current writer inspected code but did not rerun it. A memory benchmark and an accepted rate-limit change remain incomplete.
 
 ## `docs/csv-export/feature-docs/overview.md`
 
 ```markdown
-# Csv Export
+# CSV Export
 
-> Summary: Any report downloads as a CSV file with the active filters applied.
-> Feature docs: the tracked, as-built record of this feature. Updated: 2026-10-06
-> Read order: this file → `decisions.md` → `tickets.md`. Each fact lives in one of the three.
-> Source: `.scratch/csv-export` (local and untracked; `sources.json` records the last sync)
+> Summary: Analysts download filtered reports as CSV from the report toolbar.
+> Feature docs: the tracked record of this feature. Updated: 2026-10-06
+> Source: `.scratch/csv-export` (local source; conclusions are preserved here)
 
 ## Problem
 
-Analysts copy rows out of the report table by hand to get them into a spreadsheet. Reports over a few hundred rows are not practical to copy.
+Analysts copy report rows into spreadsheets to share results with colleagues who do not use the application. Manual copying is slow and can lose the active filters, making the spreadsheet disagree with the report the analyst reviewed.
 
 ## Solution
 
-A Download CSV button on every report exports the rows the analyst is looking at, with the active filters applied, as a file that opens directly in a spreadsheet.
+The toolbar offers a CSV download for the current report and its selected filters. This preserves the familiar report workflow while producing a file recipients can open in their spreadsheet application. Delivery of the complete agreed slice remains partial; the outstanding acceptance checks are recorded in ticket 01.
 
 ## What was built
 
 | Capability | Where (`path/file`) | Notes |
 |---|---|---|
-| Export endpoint streams a report as CSV | `src/api/reports/export.ts` | Honours the same filter params as the report query |
-| Rows are written in batches of 1,000 | `src/reports/csv-writer.ts` | Keeps memory flat for large reports |
-| Download button on the report toolbar | `src/ui/report/Toolbar.tsx` | Disabled while a report is loading |
-| Export is limited to 5 per user per minute | `src/api/middleware/rate-limit.ts` | Returns 429 with `Retry-After` |
+| Export endpoint uses the report's filter query | `src/api/reports/export.ts` | Code inspected; acceptance evidence in ticket 01 |
+| CSV writer streams rows | `src/reports/csv-writer.ts` | Code inspected; decision D1 |
+| Toolbar exposes the download action | `src/ui/report/Toolbar.tsx` | Code inspected; ticket 02 |
+| Middleware enforces an export rate limit | `src/api/middleware/rate-limit.ts` | Observed setting differs from accepted intent; D2–D3 |
 
 ## How it fits together
 
-The endpoint reuses `buildReportQuery` (`src/reports/query.ts`), so a filter added to reports is exported with no change here. `csv-writer.ts` owns quoting and the header row; nothing else formats CSV.
+The endpoint delegates filter construction to the existing report query builder and row formatting to the CSV writer. The toolbar submits the current filter values to that endpoint. Changes to report filters therefore need review at the shared query boundary as well as the export acceptance criteria. The rate-limit middleware is a separate constraint; its current value is recorded in D3.
 
 ## Testing
 
-Tested at the HTTP seam: `tests/api/export.test.ts` requests an export and parses the response. Run with `npm test -- export`.
+Ticket 01 records a historical passing API check, attributed to its source and not rerun in this review. Code inspection establishes the present call paths and toolbar state handling. It does not establish large-report memory use or current runtime success. Ticket 01 retains the required benchmark and rate-limit gap; ticket 02's static criterion is supported by inspection.
 
 ## Out of scope
 
-- Excel (`.xlsx`) output: CSV opens in every spreadsheet and needs no library.
-- Scheduled or emailed exports: no one asked for them in discovery.
+Excel-format files and scheduled exports were explicitly excluded; see D4 for the recorded scope rationale.
 
 ## Not built yet
 
-Nothing.
+Ticket 01 remains partial. Read its unchecked criteria for the exact implementation and verification gaps before treating the export slice as complete.
 ```
 
 ## `docs/csv-export/feature-docs/decisions.md`
 
 ```markdown
-# Csv Export — Decisions
+# CSV Export — Decisions
 
 | # | Decision | Why (alternative rejected) | Source | Status | Date |
 |---|---|---|---|---|---|
-| D1 | Stream the response instead of building the file in memory | Largest report is 400k rows (buffering it took 1.2 GB in a prototype) | spec | Accepted | 2026-09-29 |
-| D2 | Export reuses the report query builder | One definition of each filter (a separate export query would drift) | spec | Accepted | 2026-09-29 |
-| D3 | Test at the HTTP seam only | Covers query, writer and headers in one test (unit-testing the writer alone missed a header bug in the prototype) | spec | Accepted | 2026-09-29 |
-| D4 | Rate limit of 5 exports per user per minute | A double-click started two 400k-row exports during review (no limit) | fleet run csv-export | Accepted | 2026-10-03 |
-| D5 | Dates are written as ISO 8601 UTC, not in the user's locale | The spec said "as shown on screen"; locale formats do not sort in a spreadsheet | as-built | Accepted | 2026-10-04 |
+| D1 | Stream rows rather than buffer the whole CSV | Prototype reported 1.2 GB for a buffered 400k-row export; this is design evidence, not a production memory result | spec Implementation Decisions; prototype 03 Answer, linked from map.md | Accepted | 2026-09-29 |
+| D2 | Allow ten exports per user per minute | Not recorded | ticket 01 Comments: user acceptance | Accepted | 2026-10-02 |
+| D3 | Current middleware allows five exports per minute | Not recorded | inspected src/api/middleware/rate-limit.ts | Observed | Unknown |
+| D4 | Exclude Excel-format files and scheduled exports | Discovery limited the request to manually sharing current report results | spec Out of Scope | Accepted | 2026-09-29 |
+
+## Contested decisions
+
+D2 and D3 conflict. The inspected implementation establishes five; the accepted comment establishes intent for ten. No later agreement resolves this. Ticket 01 retains the missing accepted behavior; D3 does not supersede D2.
 ```
 
 ## `docs/csv-export/feature-docs/tickets.md`
 
 ```markdown
-# Csv Export — Tickets
+# CSV Export — Tickets
 
 | # | Ticket | What it delivers | Blocked by | Status | Date |
 |---|---|---|---|---|---|
-| 01 | Export endpoint | A filtered report downloads as CSV from the API | None | delivered | 2026-10-02 |
-| 02 | Download button | The analyst exports from the report toolbar | 01 | delivered | 2026-10-03 |
-| 03 | Export rate limit | A user cannot start more than 5 exports a minute | 01 | delivered | 2026-10-04 |
+| 01 | Export endpoint | Download a filtered report within the agreed limits | None | partial | Unknown |
+| 02 | Download button | Start an export from the report toolbar | 01 | delivered | Unknown |
 
 ## Acceptance criteria
 
 ### 01 — Export endpoint
 
-- [x] The response has the same rows as the report with the same filters
-- [x] A 400k-row report exports without the server exceeding 300 MB
+- [x] Export uses the selected report filters — code inspected: `src/api/reports/export.ts`; historical test passed: `npm test -- export`, API filter cases, 2026-10-03, reported in ticket 01 Comments; not rerun.
+- [ ] A 400k-row export stays below 300 MB — runtime unverified; production-equivalent benchmark remains pending.
+- [ ] Rate limit matches the accepted policy D2 — code inspected; implementation differs as recorded in D3.
 
 ### 02 — Download button
 
-- [x] The button is on every report and disabled while the report loads
+- [x] The toolbar contains a download action disabled while the report loads — code inspected: `src/ui/report/Toolbar.tsx`, handler and loading guard. This static criterion does not claim a browser interaction check.
 
-### 03 — Export rate limit
+## Discovery outcomes
 
-- [x] The sixth export within a minute returns 429 with `Retry-After`
+| Source | Type | Outcome |
+|---|---|---|
+| 03 — Buffering experiment | prototype | Resolved design question; conclusion preserved in D1 |
 ```
 
-## The same docs after a sync
+Ticket 02's dependency records the original implementation order, not a claim that ticket 01's remaining acceptance checks passed. The discovery row preserves navigation without duplicating D1's rationale.
 
-A week later `to-spec` changed the delimiter decision and `to-tickets` added ticket 04. Ticket 04 is not implemented yet. `status` printed:
+## Baseline and later reconciliation
 
-```text
-csv-export  DRIFT  .scratch/csv-export changed since 2026-10-06
-  ADDED    issues/04-semicolon-delimiter.md
-  CHANGED  spec.md
+After structural checking and semantic review, record the inspected implementation and test files explicitly:
+
+```bash
+bash scripts/feature-docs.sh check . csv-export
+bash scripts/feature-docs.sh stamp . csv-export \
+  --evidence src/api/reports/export.ts \
+  --evidence src/reports/csv-writer.ts \
+  --evidence src/ui/report/Toolbar.tsx \
+  --evidence src/api/middleware/rate-limit.ts \
+  --evidence tests/api/export.test.ts
 ```
 
-and `diff` showed the changed lines of `spec.md`:
+The test file is tracked evidence of test coverage, not evidence that it passed in this session. Source comments preserve the attributed historical result. Future comments, map changes and answers are covered by source Markdown hashes; edits to the selected implementation/test files are covered by evidence hashes.
 
-```text
-CHANGED  .scratch/csv-export/spec.md
---- synced/spec.md
-+++ current/spec.md
-@@ -31,3 +31,3 @@
- ## Implementation Decisions
- 
--- Fields are always separated by commas
-+- The delimiter follows the workspace locale setting (comma or semicolon)
-```
+If the rate limit later changes and the benchmark passes, reconcile ticket 01 using the actual result and update D3's historical status only when the replacement decision is established. If scratch is missing, preserve its last source baseline with `stamp . csv-export --evidence-only`. If nothing changed, leave Updated and the manifest untouched.
 
-`decisions.md` gains a row. Had an earlier row recorded "always commas", its status would become `Superseded by D6`:
-
-```markdown
-| D6 | Delimiter follows the workspace locale setting (comma or semicolon) | German customers' Excel splits on semicolons (always-comma opened as one column) | spec | Accepted | 2026-10-13 |
-```
-
-`tickets.md` gains a `planned` row, because the code does not show it:
-
-```markdown
-| 04 | Semicolon delimiter | Exports open correctly in locales that use `;` | 01 | planned | 2026-10-13 |
-```
-
-`overview.md` "What was built" is unchanged, "Not built yet" lists ticket 04, and `Updated:` becomes 2026-10-13. Then `stamp` records the new hashes. From then on `status` prints `PLANNED  04 Semicolon delimiter` under the feature as a reminder. When ticket 04 ships, the next sync moves it to `delivered` and adds its row to "What was built".
-
-## When the code moves
-
-A refactor later renames `src/reports/csv-writer.ts` with no spec change. `status` catches it because `overview.md` cites the path:
-
-```text
-csv-export  STALE  .scratch/csv-export is unchanged since 2026-10-13, but the docs cite files that are gone
-  MISSING  src/reports/csv-writer.ts (cited in overview.md)
-```
-
-`git log -1 -- src/reports/csv-writer.ts` names the commit that moved it. The row's path is corrected to the new file, and `status` is clean again.
+An `IN SYNC` result means recorded baselines match. Ticket 01's `PARTIAL` reminder can remain: source equality does not complete its acceptance criteria.

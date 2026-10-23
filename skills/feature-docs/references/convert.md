@@ -1,54 +1,38 @@
-# Converting existing docs into feature docs
+# Converting existing docs
 
-Where each kind of existing material lands in `docs/<feature>/feature-docs/`. Anything with no row here goes where its content fits: what exists → `overview.md`, why → `decisions.md`, units of delivered work → `tickets.md`.
+Read all supplied material before mapping it into the three feature documents. Verify implementation and acceptance claims using the evidence rules in the skill. Existing records may preserve accepted intent even where current code differs.
 
-## Old feature-init folders (`feature.md`, `plan.md`, `progress.md`)
+## Old feature-init folders
 
-These sit directly in `docs/<feature>/`. Write the new docs into `docs/<feature>/feature-docs/` beside them.
+Write into `docs/<feature>/feature-docs/` beside existing `feature.md`, `plan.md` and `progress.md` files.
 
 | From | To |
 |---|---|
-| `feature.md` Why, What, Users | `overview.md` Problem, Solution |
-| `feature.md` Scope, MVP rows | `overview.md` What was built, after checking each row against the code |
-| `feature.md` Fast-follow, Not doing | `overview.md` Out of scope, or Not built yet when it was committed |
-| `feature.md` Decisions | `decisions.md` rows, source `converted`, keeping their original numbers so existing references still resolve. `Accepted` stays; `Proposed` or `Open` becomes a row only if the code shows which way it went |
-| `feature.md` Acceptance criteria | `tickets.md` Acceptance criteria, under the milestone that delivered them |
-| `plan.md` Contracts | `overview.md` How it fits together, as the code has them now |
-| `plan.md` Milestones | `tickets.md` rows, one per milestone under its own id (`M1`, `M3.1`): `delivered`, `planned` or `withdrawn` |
-| `plan.md` Risks | `decisions.md`, only where a risk drove a choice: the mitigation is the decision. New rows continue the numbering |
-| `progress.md` Code-verified findings | `overview.md` What was built or How it fits together. A corrected assumption (❌) becomes a `decisions.md` row |
-| `progress.md` Done / Left | `tickets.md` status column, set from the code. A box left unticked for work the code now shows is `delivered`; say so under the table |
-| `progress.md` Verification notes | `overview.md` Testing, dated, marked as not re-run |
-| `progress.md` Now, Next actions, Sign-offs | Dropped. Unfinished work goes to `overview.md` Not built yet |
+| `feature.md` Why, What, Users | Overview Problem and Solution |
+| Scope/MVP rows | Overview capabilities supported by inspected code; ticket criteria for remaining work |
+| Fast-follow/Not doing | Tickets when still committed; decisions when explicitly excluded, with overview links |
+| Decisions | Decisions table, retaining IDs, recorded rationale and Accepted/Proposed state |
+| Acceptance criteria | Tickets, assessed independently of old checkbox state |
+| `plan.md` Contracts | Overview contracts, distinguishing current implementation from accepted intent |
+| Milestones | Ticket rows retaining IDs such as M1 or M3.1 |
+| Risks | Decisions only when a risk informed a significant choice |
+| `progress.md` Findings | Their owning file, with the appropriate evidence and provenance |
+| Done/Left, sign-offs | Ticket evidence or gaps; status follows the criteria, not the old heading |
+| Verification notes | Dated ticket evidence, attributed and marked not rerun unless repeated now |
 
-## A `.scratch/<feature>/` spec and tickets, feature already built
+Preserve a relevant Proposed/Open choice or unresolved disagreement. Use Observed for a choice evident only in implementation. A missing rationale is Not recorded; a missing historical date is Unknown.
 
-This is WRITE. Follow those steps and `stamp` at the end.
+## Other inputs
 
-## Loose notes, a design doc, a README section, a wiki page
+A `.scratch` spec and tickets after full or partial implementation use WRITE. For maps, typed discovery tickets, answers and comments, read `sources.md`.
 
-| Content | To |
-|---|---|
-| The problem and the pitch | `overview.md` Problem, Solution |
-| Behaviour the code has | `overview.md` What was built, with the file |
-| Behaviour the code lacks | `overview.md` Not built yet, or Out of scope when it was dropped |
-| "We chose X because Y", trade-offs, rejected options | `decisions.md`, source `converted`. Date from the doc, or from the commit that made the change |
-| Task lists, phases, milestones, changelog entries | `tickets.md` rows |
-| How to run or test it | `overview.md` Testing |
+For loose notes, a design doc, README section or wiki page, map user needs and current behavior into overview, choices and trade-offs into decisions, and work units/acceptance into tickets. Copy only material conclusions. If no delivery slices exist, say None in tickets rather than inventing historical work.
 
-When a doc gives no reason for a choice, write "not recorded" in the Why column and keep the row.
-
-## Paths
-
-Old docs often cite paths from inside a package (`src/api/push-test.ts`). Rewrite each as a path from the repo root (`services/push/src/api/push-test.ts`) after confirming the file exists; `status` checks them in that form.
-
-## Several documents for one feature
-
-Read them all before writing. Where two disagree, the code decides. Record the disagreement as one `decisions.md` row whose Why names both versions.
+When sources disagree, distinguish the implementation claim from the intent or verification claim. Record unresolved material conflicts with both origins. A source's removal is not cancellation.
 
 ## Finishing
 
-- The `Source:` line of `overview.md` names every converted path and today's date: ``converted from `docs/csv-export/feature.md`, `plan.md`, `progress.md` on 2026-10-06``.
-- A converted folder has no `sources.json` unless its origin is a local source folder that will keep changing. `status` then reports it as `UNTRACKED`, which is correct.
-- Search the repo's agent instructions (`AGENTS.md`, `CLAUDE.md`, `docs/agents/`) for pointers to the original files, and list them for the user. They need repointing at the feature docs before the originals go.
-- The originals stay until the user says to delete them.
+- Convert code citations to verified repository-relative paths, including package prefixes.
+- Name the original paths and conversion date on the overview's Source line. These references identify provenance; keep the actual material conclusion in the tracked record.
+- Run `check`. Stamp with explicit evidence files and `--source <dir>` for a continuing local source folder, or `--evidence-only` without one. On a first stamp, the latter creates a source-null manifest; an existing source baseline is preserved instead.
+- Report agent instructions pointing at originals so they can be repointed. Leave originals intact unless removal is authorized.
