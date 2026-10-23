@@ -83,6 +83,20 @@ for doc in README.md USAGE.md CHANGELOG.md; do
 done
 pass "published local documentation links resolve"
 
+# Create a temporary repo for issue #2 test
+EARLY_ERROR="$TMP/early-error"
+make_repo "$EARLY_ERROR"
+early_docs="$EARLY_ERROR/docs/csv-export/feature-docs"
+# On complete docs with no v2 manifest, stamp without --evidence exits 2 and prints the evidence message
+out="$(run 2 bash "$FD" stamp "$EARLY_ERROR" csv-export 2>&1)" || true
+contains "$out" "first reviewed stamp needs --evidence"
+# On incomplete docs, it should print both the structural findings and the evidence requirement
+rm "$early_docs/decisions.md"
+out="$(run 2 bash "$FD" stamp "$EARLY_ERROR" csv-export 2>&1)" || true
+contains "$out" "first reviewed stamp needs --evidence"
+contains "$out" "INCOMPLETE"
+pass "first stamp without --evidence reports the error even when docs are incomplete"
+
 REPO="$TMP/repo"
 make_repo "$REPO"
 DOCS="$REPO/docs/csv-export/feature-docs"
