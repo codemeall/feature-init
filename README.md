@@ -217,7 +217,7 @@ Run trigger evaluation to check skill description coverage:
 
 ## System requirements
 
-Requires bash, git, awk, and `shasum` or `sha256sum`. Node.js 18+ for the npx entry point. Windows requires WSL or Git Bash.
+Requires bash, git, awk, and `shasum` or `sha256sum`. Node.js 20+ for the npx entry point. Windows requires WSL or Git Bash.
 
 ## License
 

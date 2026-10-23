@@ -13,7 +13,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
-        node: [18, 20, 22]
+        node: [20, 22, 24]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -39,11 +39,7 @@ jobs:
           echo "npx smoke test passed for all agents"
       - name: Run shellcheck
         run: |
-          if command -v shellcheck >/dev/null 2>&1; then
-            shellcheck -S warning install.sh skills/feature-docs/scripts/feature-docs.sh tests/test.sh
-          else
-            echo "shellcheck not available, skipping"
-          fi
+          shellcheck -S warning install.sh skills/feature-docs/scripts/feature-docs.sh tests/test.sh evals/run-trigger-eval.sh
   
   trigger-check:
     runs-on: ubuntu-latest
@@ -60,3 +56,10 @@ jobs:
             fi
           done
           echo "All trigger phrases present"
+      - name: Run trigger evaluation
+        run: |
+          if ! command -v jq >/dev/null 2>&1; then
+            echo "jq not available, skipping eval"
+            exit 0
+          fi
+          ./evals/run-trigger-eval.sh

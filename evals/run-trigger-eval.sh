@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Trigger evaluation for feature-docs skill
-# Checks whether the skill description matches should-trigger and avoids should-not-trigger prompts
+# Static description check for feature-docs skill trigger coverage
+# Scores prompts by word overlap with description, measures precision and recall
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -12,16 +12,17 @@ usage() {
   cat <<EOF
 Usage: $0 [--report]
 
-Evaluates trigger precision and recall for the feature-docs skill.
-Checks that the SKILL.md description contains key phrases from should-trigger
-prompts and avoids over-matching should-not-trigger prompts.
+Static description check for the feature-docs skill. Scores each prompt in
+triggers.json by word overlap with the SKILL.md description, then validates:
+- All should-trigger prompts score above a threshold
+- No should-not-trigger prompt scores as high as the worst should-trigger
 
-  --report    Show detailed pass/fail for each prompt
+  --report    Show detailed scores for each prompt
   --help      Show this help
 
-This is a static check based on keyword presence. A full eval would test
-skill loading in a harness, but this lightweight version catches obvious
-description regressions in CI.
+This is a lightweight static check. For full evaluation, manually test skill
+loading in a harness: run 'claude -p <repo>' with and without the skill
+installed, comparing which prompts load feature-docs.
 EOF
 }
 
@@ -29,86 +30,102 @@ if [[ "${1:-}" == "--help" ]]; then usage; exit 0; fi
 REPORT=0
 if [[ "${1:-}" == "--report" ]]; then REPORT=1; fi
 
+# Require jq for JSON parsing
+if ! command -v jq >/dev/null 2>&1; then
+  echo "Error: jq is required for parsing triggers.json" >&2
+  exit 2
+fi
+
 # Extract description from SKILL.md frontmatter
 description="$(sed -n '/^---$/,/^---$/p' "$SKILL_DESC" | sed -n '/^description:/,/^[a-z][a-z]*:/p' | sed '$d' | sed 's/^description:[[:space:]]*>-[[:space:]]*//' | sed 's/^[[:space:]]*//' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 
-# Parse triggers.json
-should_trigger="$(jq -r '.should_trigger[]' "$TRIGGERS")"
-should_not_trigger="$(jq -r '.should_not_trigger[]' "$TRIGGERS")"
+# Normalize to lowercase for matching
+description_lower="$(echo "$description" | tr '[:upper:]' '[:lower:]')"
 
-# Extract key trigger phrases (first 3-4 words from each should-trigger prompt)
-extract_phrase() {
-  echo "$1" | sed 's/for.*//' | sed 's/about.*//' | sed 's/into.*//' | sed 's/to.*//' | awk '{print $1, $2, $3}' | sed 's/ *$//'
+# Score a prompt by counting how many of its significant words appear in description
+score_prompt() {
+  local prompt="$1"
+  local prompt_lower words
+  prompt_lower="$(echo "$prompt" | tr '[:upper:]' '[:lower:]')"
+  # Extract words, skip common stop words
+  words="$(echo "$prompt_lower" | tr -cs '[:alnum:]' '\n' | grep -Ev '^(the|a|an|for|to|of|in|on|at|by|with|from|this|that|is|are|these|those)$' | grep -v '^$')"
+  local total=0
+  local matched=0
+  while IFS= read -r word; do
+    [[ -n "$word" ]] || continue
+    ((total++)) || true
+    if echo "$description_lower" | grep -qw "$word"; then
+      ((matched++)) || true
+    fi
+  done <<< "$words"
+  if [[ $total -eq 0 ]]; then echo "0"; return; fi
+  awk "BEGIN {printf \"%.2f\", ($matched / $total) * 100}"
 }
 
-true_positives=0
-false_negatives=0
-true_negatives=0
-false_positives=0
+# Parse triggers
+mapfile -t should_trigger < <(jq -r '.should_trigger[]' "$TRIGGERS")
+mapfile -t should_not_trigger < <(jq -r '.should_not_trigger[]' "$TRIGGERS")
 
-echo "=== Evaluating trigger phrases against SKILL.md description ==="
+echo "=== Scoring prompts against SKILL.md description ==="
 echo
 
-# Key trigger phrases that should be in the description (from the spec)
-key_phrases=(
-  "Write tracked feature"
-  "convert existing docs"
-  "look up decisions"
-)
-
-echo "Checking key trigger phrases in description:"
-for phrase in "${key_phrases[@]}"; do
-  if echo "$description" | grep -qF "$phrase"; then
-    ((true_positives++)) || true
-    [[ $REPORT -eq 1 ]] && echo "  ✓ '$phrase' found"
-  else
-    ((false_negatives++)) || true
-    [[ $REPORT -eq 1 ]] && echo "  ✗ '$phrase' missing"
+# Score should-trigger prompts
+min_trigger_score=100
+total_trigger_score=0
+if [[ $REPORT -eq 1 ]]; then echo "Should-trigger prompts:"; fi
+for prompt in "${should_trigger[@]}"; do
+  score="$(score_prompt "$prompt")"
+  total_trigger_score="$(awk "BEGIN {print $total_trigger_score + $score}")"
+  score_int="$(awk "BEGIN {print int($score)}")"
+  if [[ $score_int -lt $min_trigger_score ]]; then
+    min_trigger_score=$score_int
   fi
+  [[ $REPORT -eq 1 ]] && printf "  %5.1f%% - %s\n" "$score" "$prompt"
+done
+
+if [[ $REPORT -eq 1 ]]; then echo; echo "Should-not-trigger prompts:"; fi
+# Score should-not-trigger prompts
+max_non_trigger_score=0
+total_non_trigger_score=0
+for prompt in "${should_not_trigger[@]}"; do
+  score="$(score_prompt "$prompt")"
+  total_non_trigger_score="$(awk "BEGIN {print $total_non_trigger_score + $score}")"
+  score_int="$(awk "BEGIN {print int($score)}")"
+  if [[ $score_int -gt $max_non_trigger_score ]]; then
+    max_non_trigger_score=$score_int
+  fi
+  [[ $REPORT -eq 1 ]] && printf "  %5.1f%% - %s\n" "$score" "$prompt"
 done
 
 echo
-echo "Checking should-trigger prompts for coverage:"
-while IFS= read -r prompt; do
-  # Check if any key words from the prompt appear in description
-  matched=0
-  for phrase in "${key_phrases[@]}"; do
-    if echo "$prompt" | grep -qF "$phrase"; then
-      matched=1
-      break
-    fi
-  done
-  [[ $REPORT -eq 1 ]] && [[ $matched -eq 1 ]] && echo "  ✓ '$prompt' (covered by key phrase)"
-  [[ $REPORT -eq 1 ]] && [[ $matched -eq 0 ]] && echo "  ~ '$prompt' (variant not directly covered)"
-done <<< "$should_trigger"
-
-echo
-echo "Should NOT trigger (checking these are distinct):"
-# For should-not-trigger, we just acknowledge they're different types of prompts
-while IFS= read -r prompt; do
-  ((true_negatives++)) || true
-  [[ $REPORT -eq 1 ]] && echo "  ✓ '$prompt' (different intent)"
-done <<< "$should_not_trigger"
-
-echo
 echo "=== Results ==="
-total_phrases=${#key_phrases[@]}
+avg_trigger="$(awk "BEGIN {printf \"%.1f\", $total_trigger_score / ${#should_trigger[@]}}")"
+avg_non_trigger="$(awk "BEGIN {printf \"%.1f\", $total_non_trigger_score / ${#should_not_trigger[@]}}")"
 
-if [[ $total_phrases -gt 0 ]]; then
-  recall=$(awk "BEGIN {printf \"%.1f\", ($true_positives / $total_phrases) * 100}")
-else
-  recall="N/A"
-fi
-
-echo "Key phrases in description:  $true_positives/$total_phrases ($recall%)"
-echo "Should-trigger prompts:      ${#key_phrases[@]} covered by key phrases"
-echo "Should-not-trigger prompts:  $true_negatives validated as distinct"
+echo "Should-trigger:     min=${min_trigger_score}%, avg=${avg_trigger}% (${#should_trigger[@]} prompts)"
+echo "Should-not-trigger: max=${max_non_trigger_score}%, avg=${avg_non_trigger}% (${#should_not_trigger[@]} prompts)"
 echo
 
-if [[ $false_negatives -gt 0 ]]; then
-  echo "WARNING: $false_negatives key trigger phrases missing from description"
+# Validation: worst should-trigger must score higher than best should-not-trigger
+if [[ $max_non_trigger_score -ge $min_trigger_score ]]; then
+  echo "FAIL: at least one should-not-trigger prompt scored >= worst should-trigger"
+  echo "  Worst should-trigger: ${min_trigger_score}%"
+  echo "  Best should-not-trigger: ${max_non_trigger_score}%"
   exit 1
 fi
 
-echo "✓ Trigger evaluation passed"
+# Validation: minimum threshold for should-trigger prompts
+threshold=20
+if [[ $min_trigger_score -lt $threshold ]]; then
+  echo "FAIL: worst should-trigger prompt scored ${min_trigger_score}%, below threshold ${threshold}%"
+  exit 1
+fi
+
+recall="$(awk "BEGIN {printf \"%.1f\", ($avg_trigger / 100) * 100}")"
+precision="$(awk "BEGIN {if ($max_non_trigger_score == 0) print 100; else printf \"%.1f\", (1 - ($max_non_trigger_score / 100)) * 100}")"
+
+echo "Recall:    ${recall}% (avg should-trigger coverage)"
+echo "Precision: ${precision}% (discriminates should-not-trigger)"
+echo
+echo "✓ Static description check passed"
 exit 0
