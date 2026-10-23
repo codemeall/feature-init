@@ -131,6 +131,15 @@ git clone https://github.com/codemeall/feature-init.git && cd feature-init
 ./install.sh all --force                          # replace an existing install
 ```
 
+To uninstall:
+
+```bash
+npx feature-docs@latest --uninstall all                        # remove from all agents
+npx feature-docs@latest --uninstall claude --project .         # remove from project
+./install.sh --uninstall all                                   # from a clone
+./install.sh --uninstall all --remove-legacy                   # also remove old feature-init
+```
+
 For an agent without skill support, paste [`adapters/AGENTS-snippet.md`](./adapters/AGENTS-snippet.md) into the repo's `AGENTS.md`. Older Cursor versions can use the rule file [`adapters/feature-docs.mdc`](./adapters/feature-docs.mdc).
 
 Version 2 requires explicit evidence files on the first stamp and a completed document structure. Existing source-only manifests require review before upgrading. Follow [Upgrading existing records](./USAGE.md#upgrading-existing-records) when updating an installation or automation from version 1.

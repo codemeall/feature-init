@@ -4,6 +4,13 @@
 
 - Fix: incomplete docs with no `--evidence` now exit 2 (usage error) instead of 1, and both the structural findings and the evidence requirement are reported in the same run.
 - Fix: restore third-person SKILL.md description with trigger phrases for better skill discovery.
+- Add: `--uninstall` flag to remove feature-docs skill from specified agents.
+- Add: `--remove-legacy` flag to also remove old feature-init skill when uninstalling.
+- Fix: `--force` now prints "replaced" message when overwriting existing install.
+- Fix: reformatted sources.json manifest now exits 2 with clear error message suggesting restore from git or delete and re-stamp.
+- Add: trigger evaluation with evals/triggers.json and evals/run-trigger-eval.sh for testing skill triggering.
+- Add: CI matrix testing on ubuntu-latest and macos-latest with Node 18, 20, 22.
+- Fix: update engines to Node >=18 and document bash requirement.
 
 ## 2026-10-23, 2.0.0: evidence-backed feature records
 
