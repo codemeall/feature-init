@@ -39,6 +39,10 @@ jobs:
           echo "npx smoke test passed for all agents"
       - name: Run shellcheck
         run: |
+          # Install shellcheck on macOS
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            brew install shellcheck
+          fi
           shellcheck -S warning install.sh skills/feature-docs/scripts/feature-docs.sh tests/test.sh evals/run-trigger-eval.sh
   
   trigger-check:
