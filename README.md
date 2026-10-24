@@ -227,7 +227,9 @@ See [evals/harness/README.md](./evals/harness/README.md).
 
 ## System requirements
 
-Requires bash, git, awk, and `shasum` or `sha256sum`. Node.js 20+ for the npx entry point. Windows requires WSL or Git Bash.
+Requires bash, git, awk, and `shasum` or `sha256sum`. Windows requires WSL or Git Bash.
+
+Node 18 support was dropped because Node 18 is end of life. Node 20 is the minimum for the npx entry point (`package.json` engines is `>=20`). CI runs the test suite on Node 20, 22, and 24 for both Ubuntu and macOS.
 
 ## License
 

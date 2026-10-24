@@ -2,6 +2,7 @@
 
 ## Unreleased (planned 2.0.1)
 
+- Note: Node 18 support was dropped because Node 18 is end of life. Node 20 is the minimum. Engines stay `>=20`, and CI stays on Node 20, 22, and 24.
 - Fix: incomplete docs with no `--evidence` now exit 2 (usage error) instead of 1, and both the structural findings and the evidence requirement are reported in the same run.
 - Fix: restore third-person SKILL.md description with trigger phrases for better skill discovery.
 - Add: `--uninstall` flag to remove feature-docs skill from specified agents.
