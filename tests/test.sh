@@ -66,6 +66,28 @@ digest() {
   if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
   else sha256sum "$1" | cut -d' ' -f1; fi
 }
+digest_stream() {
+  if command -v shasum >/dev/null 2>&1; then shasum -a 256 | cut -d' ' -f1
+  else sha256sum | cut -d' ' -f1; fi
+}
+# Hash every path in the target repo, including private snapshots under .git.
+tree_digest() {
+  local root="$1"
+  (
+    cd "$root" || exit 1
+    find . | LC_ALL=C sort | while IFS= read -r path; do
+      if [[ -L "$path" ]]; then
+        printf 'link\t%s\t%s\n' "$path" "$(readlink "$path")"
+      elif [[ -f "$path" ]]; then
+        printf 'file\t%s\t%s\n' "$path" "$(digest "$path")"
+      elif [[ -d "$path" ]]; then
+        printf 'dir\t%s\n' "$path"
+      else
+        printf 'other\t%s\n' "$path"
+      fi
+    done | digest_stream
+  )
+}
 
 cd "$ROOT"
 bash -n install.sh "$FD" tests/test.sh
@@ -305,42 +327,47 @@ done
 cp "$TMP/legacy-safe-upgrade" "$legacy_manifest"
 pass "legacy dot and slash spellings preserve drift detection and safely upgrade with or without local sources"
 
-# Issue #3: Reformatted manifest should exit 2 with clear error
-REFORMATTED="$TMP/reformatted"
-make_repo "$REFORMATTED"
-reformatted_docs="$REFORMATTED/docs/csv-export/feature-docs"
-run 0 stamp "$REFORMATTED" >/dev/null
-reformatted_manifest="$reformatted_docs/sources.json"
-cp "$reformatted_manifest" "$TMP/manifest.valid"
-# Test compact JSON (jq -c)
-if command -v jq >/dev/null 2>&1; then
-  jq -c . "$TMP/manifest.valid" > "$reformatted_manifest"
-else
-  # Compact JSON without jq: remove newlines and collapse spaces
-  cat "$TMP/manifest.valid" | tr -d '\n' | sed 's/  */ /g' > "$reformatted_manifest"
-fi
-cp "$reformatted_manifest" "$TMP/compact.json"
-rc=0
-out="$(bash "$FD" status "$REFORMATTED" csv-export 2>&1)" || rc=$?
-[[ $rc -eq 2 ]] || fail "status on compact manifest exited $rc, expected 2"
-contains "$out" "sources.json is not in the script-owned layout"
-contains "$out" "restore it from git, or delete sources.json and stamp again with --evidence"
-cmp "$reformatted_manifest" "$TMP/compact.json" || fail "reformatted manifest check changed the file"
-# Test reindented JSON (different spacing)
-sed 's/^  /    /' "$TMP/manifest.valid" > "$reformatted_manifest"
-cp "$reformatted_manifest" "$TMP/reindented.json"
-rc=0
-out="$(bash "$FD" stamp "$REFORMATTED" csv-export 2>&1)" || rc=$?
-[[ $rc -eq 2 ]] || fail "stamp on reindented manifest exited $rc, expected 2"
-contains "$out" "sources.json is not in the script-owned layout"
-contains "$out" "restore it from git, or delete sources.json and stamp again with --evidence"
-cmp "$reformatted_manifest" "$TMP/reindented.json" || fail "stamp on reformatted manifest changed the file"
-# Test that deleting sources.json and stamping again succeeds
-rm "$reformatted_manifest"
-run 0 bash "$FD" stamp "$REFORMATTED" csv-export --evidence src/export.js --evidence tests/export.test.js >/dev/null
-[[ -f "$reformatted_manifest" ]] || fail "stamp after deleting sources.json did not create new manifest"
-cp "$TMP/manifest.valid" "$reformatted_manifest"
-pass "reformatted manifest exits 2 with clear error and does not change files"
+# Issue #3: compact and reindented manifests, against both status and stamp.
+REFORMAT_BASE="$TMP/reformat-base"
+make_repo "$REFORMAT_BASE"
+run 0 stamp "$REFORMAT_BASE" >/dev/null
+cp "$REFORMAT_BASE/docs/csv-export/feature-docs/sources.json" "$TMP/manifest.valid"
+layout_error="sources.json is not in the script-owned layout"
+layout_hint="restore it from git, or delete sources.json and stamp again with --evidence"
+write_compact_manifest() {
+  if command -v jq >/dev/null 2>&1; then jq -c . "$TMP/manifest.valid"
+  else tr -d '\n' < "$TMP/manifest.valid" | sed 's/  */ /g; s/^[[:space:]]*//; s/[[:space:]]*$//'; fi
+}
+write_reindented_manifest() { sed 's/^  /    /' "$TMP/manifest.valid"; }
+for shape in compact reindented; do
+  for cmd in status stamp; do
+    repo="$TMP/reformat-$shape-$cmd"
+    cp -R "$REFORMAT_BASE" "$repo"
+    manifest="$repo/docs/csv-export/feature-docs/sources.json"
+    if [[ "$shape" == compact ]]; then write_compact_manifest > "$manifest"
+    else write_reindented_manifest > "$manifest"; fi
+    cmp -s "$manifest" "$TMP/manifest.valid" && fail "$shape manifest is still canonical"
+    before="$(tree_digest "$repo")"
+    [[ "${#before}" -eq 64 ]] || fail "tree digest failed before $shape $cmd"
+    rc=0
+    out="$(bash "$FD" "$cmd" "$repo" csv-export 2>&1)" || rc=$?
+    after="$(tree_digest "$repo")"
+    [[ "$rc" -eq 2 ]] || fail "$shape $cmd exited $rc, expected 2: $out"
+    contains "$out" "$layout_error"
+    contains "$out" "$layout_hint"
+    lacks "$out" "REVIEW REQUIRED"
+    [[ "$before" == "$after" ]] || fail "$shape $cmd changed the target tree"
+    pass "$shape manifest $cmd exits 2, names the layout error, and leaves the tree unchanged"
+  done
+done
+RECOVER="$TMP/reformat-recover"
+cp -R "$REFORMAT_BASE" "$RECOVER"
+recover_manifest="$RECOVER/docs/csv-export/feature-docs/sources.json"
+write_compact_manifest > "$recover_manifest"
+rm "$recover_manifest"
+run 0 bash "$FD" stamp "$RECOVER" csv-export --evidence src/export.js --evidence tests/export.test.js >/dev/null
+[[ -f "$recover_manifest" ]] || fail "stamp after deleting sources.json did not create a manifest"
+pass "deleting a reformatted manifest and stamping with evidence writes a new baseline"
 
 # The same relative key in three maps must keep three separate meanings.
 SCOPED="$TMP/scoped"
@@ -506,7 +533,7 @@ for agent in claude cursor codex antigravity; do
   esac
   [[ -d "$dir" ]] || fail "global install did not create $agent at $dir"
 done
-HOME="$GLOBAL_HOME" run 0 bash "$ROOT/install.sh" --uninstall all >/dev/null
+out="$(HOME="$GLOBAL_HOME" bash "$ROOT/install.sh" --uninstall all 2>&1)" || fail "first global uninstall failed: $out"
 for agent in claude cursor codex antigravity; do
   case "$agent" in
     claude) dir="$GLOBAL_HOME/.claude/skills/feature-docs" ;;
@@ -514,8 +541,24 @@ for agent in claude cursor codex antigravity; do
     codex) dir="$GLOBAL_HOME/.codex/skills/feature-docs" ;;
     antigravity) dir="$GLOBAL_HOME/.gemini/config/skills/feature-docs" ;;
   esac
+  contains "$out" "removed   $agent:"
   [[ ! -e "$dir" ]] || fail "global uninstall did not remove $agent from $dir"
 done
-pass "global-install uninstall removes feature-docs from all targets"
+pass "global-install uninstall removes feature-docs from all four targets"
+rc=0
+out="$(HOME="$GLOBAL_HOME" bash "$ROOT/install.sh" --uninstall all 2>&1)" || rc=$?
+[[ "$rc" -eq 0 ]] || fail "second global uninstall exited $rc, expected 0: $out"
+contains "$out" "Nothing to uninstall"
+lacks "$out" "removed"
+for agent in claude cursor codex antigravity; do
+  case "$agent" in
+    claude) dir="$GLOBAL_HOME/.claude/skills/feature-docs" ;;
+    cursor) dir="$GLOBAL_HOME/.cursor/skills/feature-docs" ;;
+    codex) dir="$GLOBAL_HOME/.codex/skills/feature-docs" ;;
+    antigravity) dir="$GLOBAL_HOME/.gemini/config/skills/feature-docs" ;;
+  esac
+  [[ ! -e "$dir" ]] || fail "second global uninstall recreated $agent at $dir"
+done
+pass "second global uninstall exits 0 and reports nothing to uninstall"
 
 printf '1..%d\n' "$passes"
