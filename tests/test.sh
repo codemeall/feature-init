@@ -354,6 +354,11 @@ for shape in compact reindented; do
     cmp -s "$manifest" "$TMP/manifest.valid" && fail "$shape manifest is still canonical"
     before="$(tree_digest "$repo")"
     [[ "${#before}" -eq 64 ]] || fail "tree digest failed before $shape $cmd"
+    # This file uses set -e, so a bare failing stamp would abort before the
+    # tree hash. rc=0 and `|| rc=$?` keep the caller alive and store the status.
+    # feature-docs.sh forces that status to 2: stamp does
+    # `validate_manifest || exit 2`, and status does `validate_manifest || return 2`.
+    # The assertion checks that forced code, not whatever awk returned on its own.
     rc=0
     out="$(bash "$FD" "$cmd" "$repo" csv-export 2>&1)" || rc=$?
     after="$(tree_digest "$repo")"
