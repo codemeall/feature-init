@@ -131,6 +131,15 @@ git clone https://github.com/codemeall/feature-init.git && cd feature-init
 ./install.sh all --force                          # replace an existing install
 ```
 
+To uninstall:
+
+```bash
+npx feature-docs@latest --uninstall all                        # remove from all agents
+npx feature-docs@latest --uninstall claude --project .         # remove from project
+./install.sh --uninstall all                                   # from a clone
+./install.sh --uninstall all --remove-legacy                   # also remove old feature-init
+```
+
 For an agent without skill support, paste [`adapters/AGENTS-snippet.md`](./adapters/AGENTS-snippet.md) into the repo's `AGENTS.md`. Older Cursor versions can use the rule file [`adapters/feature-docs.mdc`](./adapters/feature-docs.mdc).
 
 Version 2 requires explicit evidence files on the first stamp and a completed document structure. Existing source-only manifests require review before upgrading. Follow [Upgrading existing records](./USAGE.md#upgrading-existing-records) when updating an installation or automation from version 1.
@@ -184,12 +193,43 @@ skills/feature-docs/           the portable skill
   references/example.md        a filled set of feature docs, before and after a sync
   references/setup.md          the index, the pointer and the hooks
 adapters/                      AGENTS.md snippet and Cursor rule, for agents without skill support
+evals/                         trigger prompts, an advisory overlap check, and a harness eval
+  triggers.json                should-trigger and should-not-trigger prompts
+  extract-description.sh       shared SKILL.md description extraction
+  check-trigger-phrases.sh     blocking quoted-phrase check used by CI and tests/test.sh
+  run-trigger-eval.sh          advisory IDF overlap smoke signal; cannot separate feature docs from ticket creation
+  harness/                     real CLI trigger eval; skips when no CLI or credentials are present
 install.sh                     installs the skill into Claude Code, Cursor, Codex or Antigravity
 tests/test.sh                  checks the script, the bundle and the installer
 USAGE.md                       commands, walk-throughs and questions
 ```
 
 The skill adds `docs/<feature>/feature-docs/` to your project, and `docs/FEATURES.md` plus one section in `CLAUDE.md` or `AGENTS.md` if you run the setup.
+
+## Testing
+
+Run the test suite:
+```bash
+./tests/test.sh
+```
+
+The trigger overlap script is an advisory smoke signal. It prints coverage and max overlap, warns when its reference thresholds are missed, and exits 0. It cannot separate feature docs from ticket creation. CI blocks on the quoted trigger phrases instead. That phrase check also runs inside `./tests/test.sh`.
+```bash
+./evals/run-trigger-eval.sh --report
+```
+
+The harness eval runs each prompt in `evals/triggers.json` through a real agent CLI, once with the skill installed and once without. It records a skill load only from the CLI tool trace, then writes precision, recall, and a per-prompt summary. It is not part of CI. If the CLI or credentials are missing it prints `SKIP` and exits 0, and it does not invent scores.
+```bash
+./evals/harness/run-harness-eval.sh --runner claude
+./evals/harness/run-harness-eval.sh --runner cursor
+```
+See [evals/harness/README.md](./evals/harness/README.md).
+
+## System requirements
+
+Requires bash, git, awk, and `shasum` or `sha256sum`. Windows requires WSL or Git Bash.
+
+Node 18 support was dropped because Node 18 is end of life. Node 20 is the minimum for the npx entry point (`package.json` engines is `>=20`). CI runs the test suite on Node 20, 22, and 24 for both Ubuntu and macOS.
 
 ## License
 

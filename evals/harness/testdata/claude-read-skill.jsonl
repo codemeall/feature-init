@@ -1,0 +1,2 @@
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"path":"/tmp/proj/.claude/skills/feature-docs/SKILL.md"}}]}}
+{"type":"result","subtype":"success","result":"done"}

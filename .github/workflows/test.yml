@@ -8,9 +8,59 @@ permissions:
   contents: read
 
 jobs:
-  feature-init:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Verify scripts, compatibility, and packaged assets
+        run: ./tests/test.sh
+      - name: Pack and smoke test npx entry point
+        run: |
+          npm pack
+          TEST_HOME=$(mktemp -d)
+          HOME="$TEST_HOME" npx ./feature-docs-*.tgz all
+          for agent in claude cursor codex antigravity; do
+            case "$agent" in
+              claude) dir="$TEST_HOME/.claude/skills/feature-docs" ;;
+              cursor) dir="$TEST_HOME/.cursor/skills/feature-docs" ;;
+              codex) dir="$TEST_HOME/.codex/skills/feature-docs" ;;
+              antigravity) dir="$TEST_HOME/.gemini/config/skills/feature-docs" ;;
+            esac
+            test -d "$dir" || { echo "Missing $agent install at $dir"; exit 1; }
+            "$dir/scripts/feature-docs.sh" --help >/dev/null || { echo "$agent script failed"; exit 1; }
+          done
+          echo "npx smoke test passed for all agents"
+      - name: Run shellcheck
+        run: |
+          # Install shellcheck on macOS
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            brew install shellcheck
+          fi
+          shellcheck -S warning \
+            install.sh \
+            skills/feature-docs/scripts/feature-docs.sh \
+            tests/test.sh \
+            evals/run-trigger-eval.sh \
+            evals/extract-description.sh \
+            evals/check-trigger-phrases.sh \
+            evals/harness/lib.sh \
+            evals/harness/run-harness-eval.sh \
+            evals/harness/runners/claude.sh \
+            evals/harness/runners/cursor.sh \
+            tests/fixtures/harness-runner-missing
+  
+  trigger-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify scripts, compatibility, and packaged assets
-        run: ./tests/test.sh
+      - name: Verify quoted trigger phrases
+        run: ./evals/check-trigger-phrases.sh
+      - name: Advisory IDF overlap smoke signal
+        run: ./evals/run-trigger-eval.sh --report

@@ -23,6 +23,6 @@
     "USAGE.md"
   ],
   "engines": {
-    "node": ">=16"
+    "node": ">=20"
   }
 }

@@ -1,9 +1,13 @@
 ---
 name: feature-docs
 description: >-
-  Write tracked feature records after full or partial implementation, convert existing docs,
-  reconcile changed sources or implementation evidence, or look up decisions before changing
-  a documented feature.
+  Writes, converts, syncs and looks up tracked as-built feature docs (overview.md,
+  decisions.md, tickets.md) in docs/<feature>/feature-docs/. Reconciles and updates
+  those docs when sources or implementation change. Use when the user says "write the
+  feature docs", "document this feature", "convert these docs", "sync the feature
+  docs", "reconcile the feature docs", "update the feature documentation", "what did
+  we decide about X", or when a .scratch spec or ticket changed after its docs were
+  written.
 ---
 
 # feature-docs

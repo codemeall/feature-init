@@ -1,6 +1,24 @@
 # Changelog
 
-## 2026-10-23 — 2.0.0: evidence-backed feature records
+## Unreleased (planned 2.0.1)
+
+- Note: Node 18 support was dropped because Node 18 is end of life. Node 20 is the minimum. Engines stay `>=20`, and CI stays on Node 20, 22, and 24.
+- Fix: incomplete docs with no `--evidence` now exit 2 (usage error) instead of 1, and both the structural findings and the evidence requirement are reported in the same run.
+- Fix: restore third-person SKILL.md description with trigger phrases for better skill discovery.
+- Add: `--uninstall` flag to remove feature-docs skill from specified agents.
+- Add: `--remove-legacy` flag to also remove old feature-init skill when uninstalling.
+- Fix: `--force` now prints "replaced" message when overwriting existing install.
+- Fix: reformatted sources.json manifest now exits 2 with clear error message suggesting restore from git or delete and re-stamp.
+- Add: trigger evaluation with evals/triggers.json and evals/run-trigger-eval.sh for testing skill triggering.
+- Note: the trigger eval is advisory. It is a static smoke signal and cannot separate feature docs from ticket creation.
+- Add: a harness eval under `evals/harness/` that runs each prompt through a real agent CLI with the skill installed and without it. Skill loads come from the CLI trace. It writes precision, recall, and per-prompt results, skips when no CLI or credentials are present, and is not part of required CI.
+- Test: compact and reindented manifests are checked with both `status` and `stamp`. Each case expects exit 2, the layout error, and an unchanged target tree.
+- Test: a second global uninstall under a temp HOME exits 0 and reports that there is nothing to uninstall.
+- Test: the quoted trigger phrase check runs in `tests/test.sh`. Description extraction is shared by CI and the advisory overlap script.
+- Add: CI matrix testing on ubuntu-latest and macos-latest with Node 20, 22, 24.
+- Fix: update engines to Node >=20 and document bash requirement.
+
+## 2026-10-23, 2.0.0: evidence-backed feature records
 
 This is a major release because first stamps now require explicit evidence files, incomplete documents cannot be stamped, and legacy source-only records return `REVIEW REQUIRED` (exit 1) until reviewed. Existing manifests remain readable; see [Upgrading existing records](./USAGE.md#upgrading-existing-records) for migration.
 
@@ -12,17 +30,17 @@ This is a major release because first stamps now require explicit evidence files
 - Expand regressions for incomplete records, migration, fresh clones, changed evidence, and unchanged repeated operations.
 - Preserve safe legacy source-path spellings during migration, and exclude Git metadata/generated feature docs from source scans to prevent recursive snapshot drift.
 
-## 2026-10-07 — 1.0.1: sources from a Fleet run
+## 2026-10-07, 1.0.1: sources from a Fleet run
 
 - WRITE names a Fleet run's worker reports and evidence files as inputs for the Testing section and the delivery dates, and dates a Fleet-delivered ticket from `verified_at` in `fleet resume <run> --json`. They are writing inputs, not tracked sources: `stamp` still hashes only `.scratch/<feature>`.
 - USAGE notes that a Fleet lead runs `status` on a documented feature before its closing report.
 
-## 2026-10-06 — published to npm as `feature-docs`
+## 2026-10-06, published to npm as `feature-docs`
 
 - `npx feature-docs@latest <agent...> [--project <repo>] [--force]` runs the bundled `install.sh`; `--force` updates an existing install.
 - `npx skills add codemeall/feature-init --skill feature-docs` keeps working from GitHub.
 
-## 2026-10-06 — feature docs replace the 3-doc lifecycle
+## 2026-10-06, feature docs replace the 3-doc lifecycle
 
 The skill is renamed from `feature-init` to `feature-docs`, and it now records a feature after it is built instead of driving it from idea to release. Planning is left to the tools that already do it (`grill-with-docs`, `to-spec`, `to-tickets`, agent-fleet); this skill writes the tracked record those tools do not produce, because their specs and tickets stay in the untracked `.scratch/` folder.
 
@@ -59,6 +77,6 @@ The skill is renamed from `feature-init` to `feature-docs`, and it now records a
 
 The repository is still named `feature-init`. Renaming it on GitHub is optional: old URLs redirect.
 
-## Earlier — 3-doc lifecycle
+## Earlier, 3-doc lifecycle
 
 The first version, `feature-init`, scaffolded `feature.md`, `plan.md` and `progress.md` per feature and tracked it through Idea, Discovery, Design, Build and Released, with Accepted-decision gates and progress-first handoffs between sessions.
