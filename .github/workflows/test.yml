@@ -43,38 +43,24 @@ jobs:
           if [[ "$RUNNER_OS" == "macOS" ]]; then
             brew install shellcheck
           fi
-          shellcheck -S warning install.sh skills/feature-docs/scripts/feature-docs.sh tests/test.sh evals/run-trigger-eval.sh
+          shellcheck -S warning \
+            install.sh \
+            skills/feature-docs/scripts/feature-docs.sh \
+            tests/test.sh \
+            evals/run-trigger-eval.sh \
+            evals/extract-description.sh \
+            evals/check-trigger-phrases.sh \
+            evals/harness/lib.sh \
+            evals/harness/run-harness-eval.sh \
+            evals/harness/runners/claude.sh \
+            evals/harness/runners/cursor.sh \
+            tests/fixtures/harness-runner-missing
   
   trigger-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Verify quoted trigger phrases
-        run: |
-          description="$(sed -n '/^---$/,/^---$/p' skills/feature-docs/SKILL.md | sed -n '/^description:/,/^[a-z][a-z]*:/p' | sed '$d' | sed 's/^description:[[:space:]]*>-[[:space:]]*//' | sed 's/^[[:space:]]*//' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-          echo "Description: $description"
-          failed=0
-          if [[ "$description" != "Writes, converts, syncs and looks up"* ]]; then
-            echo "ERROR: description must open with 'Writes, converts, syncs and looks up'"
-            failed=1
-          fi
-          for phrase in \
-            "write the feature docs" \
-            "document this feature" \
-            "convert these docs" \
-            "sync the feature docs" \
-            "reconcile the feature docs" \
-            "update the feature documentation" \
-            "what did we decide about X"
-          do
-            if ! echo "$description" | grep -qF "$phrase"; then
-              echo "ERROR: Missing trigger phrase: $phrase"
-              failed=1
-            fi
-          done
-          if [[ "$failed" -ne 0 ]]; then
-            exit 1
-          fi
-          echo "All quoted trigger phrases present"
+        run: ./evals/check-trigger-phrases.sh
       - name: Advisory IDF overlap smoke signal
         run: ./evals/run-trigger-eval.sh --report

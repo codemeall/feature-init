@@ -51,8 +51,8 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 2
 fi
 
-# Extract description from SKILL.md frontmatter
-description="$(sed -n '/^---$/,/^---$/p' "$SKILL_DESC" | sed -n '/^description:/,/^[a-z][a-z]*:/p' | sed '$d' | sed 's/^description:[[:space:]]*>-[[:space:]]*//' | sed 's/^[[:space:]]*//' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+# Same extractor as the CI phrase check and tests/test.sh.
+description="$(bash "$SCRIPT_DIR/extract-description.sh" "$SKILL_DESC")"
 
 {
   jq -r '.should_trigger[] | "T\t" + .' "$TRIGGERS"

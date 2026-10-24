@@ -10,6 +10,10 @@
 - Fix: reformatted sources.json manifest now exits 2 with clear error message suggesting restore from git or delete and re-stamp.
 - Add: trigger evaluation with evals/triggers.json and evals/run-trigger-eval.sh for testing skill triggering.
 - Note: the trigger eval is advisory. It is a static smoke signal and cannot separate feature docs from ticket creation.
+- Add: a harness eval under `evals/harness/` that runs each prompt through a real agent CLI with the skill installed and without it. Skill loads come from the CLI trace. It writes precision, recall, and per-prompt results, skips when no CLI or credentials are present, and is not part of required CI.
+- Test: compact and reindented manifests are checked with both `status` and `stamp`. Each case expects exit 2, the layout error, and an unchanged target tree.
+- Test: a second global uninstall under a temp HOME exits 0 and reports that there is nothing to uninstall.
+- Test: the quoted trigger phrase check runs in `tests/test.sh`. Description extraction is shared by CI and the advisory overlap script.
 - Add: CI matrix testing on ubuntu-latest and macos-latest with Node 20, 22, 24.
 - Fix: update engines to Node >=20 and document bash requirement.
 

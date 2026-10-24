@@ -90,19 +90,24 @@ tree_digest() {
 }
 
 cd "$ROOT"
-bash -n install.sh "$FD" tests/test.sh
+bash -n install.sh "$FD" tests/test.sh \
+  evals/extract-description.sh evals/check-trigger-phrases.sh evals/run-trigger-eval.sh \
+  evals/harness/lib.sh evals/harness/run-harness-eval.sh \
+  evals/harness/runners/claude.sh evals/harness/runners/cursor.sh \
+  tests/fixtures/harness-runner-missing
 for name in SKILL.md assets/templates/overview.md assets/templates/decisions.md assets/templates/tickets.md references/convert.md references/example.md references/setup.md references/sources.md; do
   [[ -f "$SKILL/$name" ]] || fail "missing resource: $name"
 done
 pass "shell entrypoints parse and portable skill resources exist"
-description="$(sed -n '/^---$/,/^---$/p' "$SKILL/SKILL.md" | sed -n '/^description:/,/^[a-z][a-z]*:/p' | sed '$d' | sed 's/^description:[[:space:]]*>-[[:space:]]*//' | sed 's/^[[:space:]]*//' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+description="$(bash "$ROOT/evals/extract-description.sh")"
 description_length="${#description}"
 [[ "$description_length" -le 1024 ]] || fail "SKILL.md description is $description_length chars, exceeds 1024 char limit"
 [[ "$description" == "Writes, converts, syncs and looks up"* ]] || fail "SKILL.md description should start with 'Writes, converts, syncs and looks up'"
 contains "$description" "Use when"
-contains "$description" "write the feature docs"
-contains "$description" "sync the feature docs"
-pass "SKILL.md description is under 1024 chars, contains 'Use when' and trigger phrases, and starts with exact opening"
+pass "SKILL.md description is under 1024 chars, contains 'Use when', and starts with the exact opening"
+phrase_out="$(bash "$ROOT/evals/check-trigger-phrases.sh")" || fail "quoted trigger phrase check failed: $phrase_out"
+contains "$phrase_out" "All quoted trigger phrases present"
+pass "quoted trigger phrases match the CI check"
 for doc in README.md USAGE.md CHANGELOG.md; do
   while IFS= read -r link; do [[ -z "$link" || -e "$ROOT/$link" ]] || fail "$doc links to $link"; done < <(grep -oE '\]\(\./[^)#]*' "$doc" | sed 's/^](//' | sort -u || true)
 done
@@ -560,5 +565,65 @@ for agent in claude cursor codex antigravity; do
   [[ ! -e "$dir" ]] || fail "second global uninstall recreated $agent at $dir"
 done
 pass "second global uninstall exits 0 and reports nothing to uninstall"
+
+command -v node >/dev/null 2>&1 || fail "node is required for harness trace tests"
+TRACE_JS="$ROOT/evals/harness/trace.js"
+SKILL_TRACE_DIR="$TMP/skill-trace"
+mkdir -p "$SKILL_TRACE_DIR"
+run 0 node "$TRACE_JS" skill-loaded --trace "$ROOT/evals/harness/testdata/claude-skill-tool.jsonl" --skill feature-docs --skill-dir "$SKILL_TRACE_DIR"
+run 0 node "$TRACE_JS" skill-loaded --trace "$ROOT/evals/harness/testdata/claude-read-skill.jsonl" --skill feature-docs --skill-dir "$SKILL_TRACE_DIR"
+run 1 node "$TRACE_JS" skill-loaded --trace "$ROOT/evals/harness/testdata/claude-prose-only.jsonl" --skill feature-docs --skill-dir "$SKILL_TRACE_DIR"
+run 1 node "$TRACE_JS" skill-loaded --trace "$ROOT/evals/harness/testdata/claude-other-skill.jsonl" --skill feature-docs --skill-dir "$SKILL_TRACE_DIR"
+rc=0
+err="$(node "$TRACE_JS" skill-loaded --trace "$ROOT/evals/harness/testdata/claude-truncated.jsonl" --skill feature-docs --skill-dir "$SKILL_TRACE_DIR" 2>&1)" || rc=$?
+[[ "$rc" -eq 2 ]] || fail "truncated trace exited $rc, expected 2: $err"
+contains "$err" "trace has no result event"
+run 0 node "$TRACE_JS" skill-loaded --trace "$ROOT/evals/harness/testdata/cursor-read.jsonl" --skill feature-docs --skill-dir "$SKILL_TRACE_DIR"
+run 1 node "$TRACE_JS" skill-loaded --trace "$ROOT/evals/harness/testdata/cursor-mention.jsonl" --skill feature-docs --skill-dir "$SKILL_TRACE_DIR"
+pass "skill load is read from the tool trace, not from reply text"
+
+cat > "$TMP/observations.json" <<'JSON'
+[
+  {"expected":"trigger","loaded_with_skill":true,"loaded_without_skill":false,"prompt":"a"},
+  {"expected":"trigger","loaded_with_skill":false,"loaded_without_skill":false,"prompt":"b"},
+  {"expected":"near_miss","loaded_with_skill":true,"loaded_without_skill":false,"prompt":"c"},
+  {"expected":"near_miss","loaded_with_skill":false,"loaded_without_skill":false,"prompt":"d"}
+]
+JSON
+node "$TRACE_JS" score "$TMP/observations.json" | node -e '
+const fs = require("node:fs");
+const score = JSON.parse(fs.readFileSync(0, "utf8"));
+if (score.precision !== 0.5 || score.recall !== 0.5) process.exit(1);
+if (score.true_positive !== 1 || score.false_positive !== 1 || score.false_negative !== 1 || score.true_negative !== 1) process.exit(1);
+if (score.contaminated !== false) process.exit(1);
+' || fail "precision and recall formula"
+cat > "$TMP/contaminated.json" <<'JSON'
+[{"expected":"trigger","loaded_with_skill":true,"loaded_without_skill":true,"prompt":"a"}]
+JSON
+node "$TRACE_JS" score "$TMP/contaminated.json" | node -e '
+const fs = require("node:fs");
+const score = JSON.parse(fs.readFileSync(0, "utf8"));
+if (score.contaminated !== true || score.precision !== null || score.recall !== null) process.exit(1);
+' || fail "contaminated runs must not invent precision or recall"
+report_dir="$TMP/harness-report"
+node "$TRACE_JS" report --observations "$TMP/observations.json" --status complete --runner fixture --out "$report_dir" >/dev/null
+contains "$(cat "$report_dir/summary.md")" "Precision: 0.5000"
+contains "$(cat "$report_dir/summary.md")" "Recall: 0.5000"
+contains "$(cat "$report_dir/results.json")" '"precision": 0.5'
+report_rc=0
+node "$TRACE_JS" report --observations "$TMP/contaminated.json" --status complete --runner fixture --out "$TMP/harness-contaminated" >/dev/null || report_rc=$?
+[[ "$report_rc" -eq 2 ]] || fail "contaminated report exited $report_rc, expected 2"
+contains "$(cat "$TMP/harness-contaminated/results.json")" '"precision": null'
+contains "$(cat "$TMP/harness-contaminated/summary.md")" "Precision: not computed"
+pass "harness score formula reports precision and recall, and withholds both when contaminated"
+
+rc=0
+out="$(bash "$ROOT/evals/harness/run-harness-eval.sh" --runner "$ROOT/tests/fixtures/harness-runner-missing" 2>&1)" || rc=$?
+[[ "$rc" -eq 0 ]] || fail "missing runner skip exited $rc: $out"
+contains "$out" "SKIP:"
+contains "$out" "did not score any prompts"
+contains "$out" "./evals/harness/run-harness-eval.sh --runner claude"
+lacks "$out" '"precision"'
+pass "harness skips cleanly when the runner has no CLI and does not invent scores"
 
 printf '1..%d\n' "$passes"

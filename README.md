@@ -193,9 +193,12 @@ skills/feature-docs/           the portable skill
   references/example.md        a filled set of feature docs, before and after a sync
   references/setup.md          the index, the pointer and the hooks
 adapters/                      AGENTS.md snippet and Cursor rule, for agents without skill support
-evals/                         advisory trigger smoke check and prompt sets
+evals/                         trigger prompts, an advisory overlap check, and a harness eval
   triggers.json                should-trigger and should-not-trigger prompts
+  extract-description.sh       shared SKILL.md description extraction
+  check-trigger-phrases.sh     blocking quoted-phrase check used by CI and tests/test.sh
   run-trigger-eval.sh          advisory IDF overlap smoke signal; cannot separate feature docs from ticket creation
+  harness/                     real CLI trigger eval; skips when no CLI or credentials are present
 install.sh                     installs the skill into Claude Code, Cursor, Codex or Antigravity
 tests/test.sh                  checks the script, the bundle and the installer
 USAGE.md                       commands, walk-throughs and questions
@@ -210,10 +213,17 @@ Run the test suite:
 ./tests/test.sh
 ```
 
-The trigger overlap script is an advisory smoke signal. It prints coverage and max overlap, warns when its reference thresholds are missed, and exits 0. It cannot separate feature docs from ticket creation. CI blocks on the quoted trigger phrases instead.
+The trigger overlap script is an advisory smoke signal. It prints coverage and max overlap, warns when its reference thresholds are missed, and exits 0. It cannot separate feature docs from ticket creation. CI blocks on the quoted trigger phrases instead. That phrase check also runs inside `./tests/test.sh`.
 ```bash
 ./evals/run-trigger-eval.sh --report
 ```
+
+The harness eval runs each prompt in `evals/triggers.json` through a real agent CLI, once with the skill installed and once without. It records a skill load only from the CLI tool trace, then writes precision, recall, and a per-prompt summary. It is not part of CI. If the CLI or credentials are missing it prints `SKIP` and exits 0, and it does not invent scores.
+```bash
+./evals/harness/run-harness-eval.sh --runner claude
+./evals/harness/run-harness-eval.sh --runner cursor
+```
+See [evals/harness/README.md](./evals/harness/README.md).
 
 ## System requirements
 
