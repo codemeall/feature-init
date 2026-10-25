@@ -48,5 +48,14 @@ child.on("error", (error) => {
 child.on("exit", (code, signal) => {
   if (stopping) return;
   clearTimeout(deadline);
+  // The runner can exit while background descendants remain in its process
+  // group. Timeout and signal paths already signal that group. A normal exit
+  // must too. Ignore a group that is already gone, and do not replace the
+  // runner status when the signal itself fails.
+  try {
+    signalGroup("SIGTERM");
+  } catch {
+    // signalGroup ignores ESRCH. Any other error is ignored here on purpose.
+  }
   process.exit(code === null ? 128 + constants.signals[signal] : code);
 });

@@ -14,6 +14,8 @@ cursor_bin() {
   if command -v agent >/dev/null 2>&1; then
     local help
     help="$(run_with_timeout 5 agent --help 2>/dev/null)" || return 1
+    # Other tools also install a command named agent. Cursor's help prints
+    # "Start the Cursor Agent", so a name match alone is not enough.
     if [[ "$help" == *"Start the Cursor Agent"* ]]; then
       command -v agent
       return 0
@@ -71,7 +73,13 @@ run_cmd() (
     wait "$!" || rc=$?
     return "$rc"
   fi
-  "$bin" "${args[@]}" < /dev/null >"$trace" 2>"$trace.stderr"
+  # A foreground CLI would defer TERM and INT until it returned. wait is
+  # interruptible, so these traps run even when the CLI ignores the signal.
+  trap 'exit 143' TERM
+  trap 'exit 130' INT
+  "$bin" "${args[@]}" < /dev/null >"$trace" 2>"$trace.stderr" &
+  wait "$!" || rc=$?
+  return "$rc"
 )
 
 cmd="${1:-}"
