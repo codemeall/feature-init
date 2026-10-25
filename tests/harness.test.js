@@ -82,6 +82,63 @@ test("timeout preserves ordinary command exit codes", () => {
   }
 });
 
+test("normal runner exit stops a background child in the process group", async (t) => {
+  const dir = workspace(t);
+  const bin = path.join(dir, "bin");
+  fs.mkdirSync(bin);
+  for (const [name, target] of [["bash", "/bin/bash"], ["node", process.execPath],
+    ["sleep", "/bin/sleep"], ["dirname", "/usr/bin/dirname"]]) {
+    fs.symlinkSync(target, path.join(bin, name));
+  }
+  const pidFile = path.join(dir, "child.pid");
+  let childPid = 0;
+  t.after(() => {
+    if (!Number.isInteger(childPid) || childPid <= 0) return;
+    try {
+      process.kill(childPid, "SIGKILL");
+    } catch {
+      // The child has already exited.
+    }
+  });
+  const runner = path.join(dir, "runner.sh");
+  fs.writeFileSync(runner, [
+    "#!/bin/bash",
+    "\"$TEST_NODE\" -e 'require(\"node:fs\").writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000);' \"$1\" </dev/null >/dev/null 2>&1 &",
+    "for ((i=0; i<40; i++)); do",
+    "  [[ -s \"$1\" ]] && break",
+    "  sleep 0.05",
+    "done",
+    "[[ -s \"$1\" ]] || exit 1",
+    "exit 0",
+    "",
+  ].join("\n"));
+  const result = spawnSync("/bin/bash", ["-c",
+    "source \"$1\"; run_with_timeout 15 bash \"$2\" \"$3\"", "test",
+    path.join(harness, "lib.sh"), runner, pidFile], {
+    env: { ...process.env, PATH: bin, TEST_NODE: process.execPath },
+    stdio: "ignore",
+    timeout: 8000,
+  });
+  if (fs.existsSync(pidFile)) childPid = Number(fs.readFileSync(pidFile, "utf8"));
+  assert.equal(result.status, 0, String(result.error || "runner did not exit normally"));
+  const pid = childPid;
+  assert.equal(Number.isInteger(pid) && pid > 0, true, "background child did not start");
+  let gone = false;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if (error.code === "ESRCH") {
+        gone = true;
+        break;
+      }
+      throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.equal(gone, true, `background child ${pid} still running after a normal exit`);
+});
+
 for (const runner of ["claude", "cursor"]) {
   test(`${runner} timeout removes temporary credentials even if the CLI ignores TERM`, (t) => {
     const dir = workspace(t);
