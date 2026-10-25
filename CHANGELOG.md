@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased (planned 2.0.1)
+## 2026-10-26, 2.1.0: publish with provenance
+
+2.0.0 was published without npm provenance. 2.1.0 is the first release published from GitHub Actions with provenance. 2.0.0 declared Node >=16. This release requires Node >=20 and adds installer flags, so the version is 2.1.0.
 
 - Fix: harness timeouts stop agent descendants on macOS and Linux, trace loads require read operations from the selected installation, and relative output paths work with the Claude runner.
 - Fix: the without-skill control detects globally installed skill loads, and the Cursor runner avoids unrelated programs named `agent`.
