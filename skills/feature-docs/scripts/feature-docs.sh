@@ -314,8 +314,19 @@ cmd_stamp() {
     synced="$(manifest_field "$manifest" synced)"
   fi
   findings="$(structure_findings "$repo" "$slug")" || exit 2
-  if [[ -n "$findings" ]]; then printf '%s  CHECK FAILED\n%s\n' "$slug" "$findings"; exit 1; fi
-  if [[ "$selected" -eq 0 && "$version" != 2 ]]; then die "first reviewed stamp needs --evidence <repo-relative file> (repeat for code and tests)"; fi
+  evidence_error=""
+  if [[ "$selected" -eq 0 && "$version" != 2 ]]; then
+    evidence_error="first reviewed stamp needs --evidence <repo-relative file> (repeat for code and tests)"
+  fi
+  if [[ -n "$findings" && -n "$evidence_error" ]]; then
+    printf '%s  CHECK FAILED\n%s\n' "$slug" "$findings"
+    die "$evidence_error"
+  elif [[ -n "$findings" ]]; then
+    printf '%s  CHECK FAILED\n%s\n' "$slug" "$findings"
+    exit 1
+  elif [[ -n "$evidence_error" ]]; then
+    die "$evidence_error"
+  fi
   WORK="$(mktemp -d "$dest/.stamp.XXXXXX")" || die "cannot stage manifest"
   if [[ "$selected" -eq 1 ]]; then
     printf '%s\n' "${evidence[@]}" | LC_ALL=C sort -u > "$WORK/paths"
