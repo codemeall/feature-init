@@ -109,7 +109,7 @@ The agent reads `overview.md` for context, then `decisions.md` before proposing 
 
 The skill follows the [SKILL.md standard](https://agentskills.io) that Claude Code, Cursor, Codex and Antigravity read natively.
 
-Node 20 is the minimum for the `npx` commands below. `package.json` engines is `>=20`. The same commands work on macOS and Linux. The clone path uses `bash` and does not need Node.
+Node 20 is the minimum for the `npx` commands below. `package.json` engines is `>=20`. Use the same commands on macOS and Linux. The clone path uses `bash` and does not need Node.
 
 ```bash
 npx skills add codemeall/feature-init --skill feature-docs -g   # all projects
