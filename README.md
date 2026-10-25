@@ -111,13 +111,7 @@ The skill follows the [SKILL.md standard](https://agentskills.io) that Claude Co
 
 Node 20 is the minimum for the `npx` commands below. `package.json` engines is `>=20`. Use the same commands on macOS and Linux. The clone path uses `bash` and does not need Node.
 
-```bash
-npx skills add codemeall/feature-init --skill feature-docs -g   # all projects
-npx skills add codemeall/feature-init --skill feature-docs      # the current project only
-npx skills add codemeall/feature-init --skill feature-docs -g -a claude-code -a codex -a cursor
-```
-
-Or from npm, which runs the bundled installer (same arguments as `install.sh` below):
+From npm. This runs the bundled `install.sh`:
 
 ```bash
 npx feature-docs@latest all                              # every supported agent, globally
@@ -125,7 +119,18 @@ npx feature-docs@latest claude --project .               # into the current repo
 npx feature-docs@latest all --force                      # update an existing install
 ```
 
-Or from a clone, with no Node:
+A global install writes only these directories:
+
+- `~/.claude/skills/feature-docs`
+- `~/.cursor/skills/feature-docs`
+- `~/.codex/skills/feature-docs`
+- `~/.gemini/config/skills/feature-docs`
+
+A `--project` install writes `<repo>/.claude/skills/feature-docs`, `<repo>/.cursor/skills/feature-docs`, `<repo>/.codex/skills/feature-docs`, and `<repo>/.agents/skills/feature-docs`.
+
+The package published as `feature-docs@2.0.0` accepts those install commands. It rejects `--uninstall` and `--remove-legacy`.
+
+From a clone of this repository, with no Node:
 
 ```bash
 git clone https://github.com/codemeall/feature-init.git && cd feature-init
@@ -133,16 +138,21 @@ git clone https://github.com/codemeall/feature-init.git && cd feature-init
 ./install.sh claude codex                         # only the ones you use
 ./install.sh cursor --project /path/to/your-repo  # into one repo, to commit with it
 ./install.sh all --force                          # replace an existing install
+./install.sh --uninstall all                      # remove feature-docs
+./install.sh --uninstall all --remove-legacy      # also remove old feature-init
 ```
 
-To uninstall:
+`install.sh` in this repository accepts `--uninstall` and `--remove-legacy`. `--remove-legacy` also deletes a legacy `feature-init` skill directory next to `feature-docs`.
+
+The third-party `skills` CLI is a different installer:
 
 ```bash
-npx feature-docs@latest --uninstall all                        # remove from all agents
-npx feature-docs@latest --uninstall claude --project .         # remove from project
-./install.sh --uninstall all                                   # from a clone
-./install.sh --uninstall all --remove-legacy                   # also remove old feature-init
+npx skills add codemeall/feature-init --skill feature-docs -g
+npx skills add codemeall/feature-init --skill feature-docs
+npx skills add codemeall/feature-init --skill feature-docs -g -a claude-code -a codex -a cursor
 ```
+
+That CLI writes `~/.agents/skills/feature-docs` for a global install, or `./.agents/skills/feature-docs` for a project install. With `-a claude-code` it also symlinks `~/.claude/skills/feature-docs` to the global copy. It does not create `~/.cursor/skills/feature-docs`, `~/.codex/skills/feature-docs`, or `~/.gemini/config/skills/feature-docs`. Use `npx feature-docs@latest` or `./install.sh` when you want those directories. Checked with the `skills` CLI on Linux, Node 20.20.2 and Node 22.23.4, in a clean home.
 
 For an agent without skill support, paste [`adapters/AGENTS-snippet.md`](./adapters/AGENTS-snippet.md) into the repo's `AGENTS.md`. Older Cursor versions can use the rule file [`adapters/feature-docs.mdc`](./adapters/feature-docs.mdc).
 
