@@ -49,4 +49,6 @@ A project install (`--project <repo>`) writes only these skill directories:
 
 The Antigravity project path is `<repo>/.agents/skills`, not `<repo>/.gemini/config/skills`. The global Antigravity path is `$HOME/.gemini/config/skills`.
 
+Antigravity project installs share `<repo>/.agents/skills/feature-docs` with the third-party `skills` CLI, so `--uninstall antigravity --project <repo>` also removes a copy that CLI installed there, while leaving that CLI's `skills-lock.json` untouched.
+
 The copy sets the executable bit on `scripts/feature-docs.sh` inside the destination. `--force` deletes an existing `feature-docs` directory at that destination and copies a new one. `--uninstall` deletes the `feature-docs` directory for the named agents. `--remove-legacy` is valid only with `--uninstall`, and it also deletes a legacy `feature-init` directory in that same parent. The installer does not write anywhere else.

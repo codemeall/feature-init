@@ -130,6 +130,8 @@ A `--project` install writes `<repo>/.claude/skills/feature-docs`, `<repo>/.curs
 
 The package published as `feature-docs@2.0.0` accepts those install commands. It rejects `--uninstall` and `--remove-legacy`.
 
+Once published, 2.1.0 and later also accept `--uninstall` and `--remove-legacy` through npx (`npx feature-docs@latest --uninstall all`). 2.0.0 does not.
+
 From a clone of this repository, with no Node:
 
 ```bash
