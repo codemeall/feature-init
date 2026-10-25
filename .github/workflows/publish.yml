@@ -1,0 +1,130 @@
+name: publish
+
+# Tag pushes only. The tag must equal v plus package.json version.
+on:
+  push:
+    tags:
+      - "v*"
+
+# id-token: write is set on the publish job only.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+      - name: Verify the tag matches package.json
+        run: |
+          expected="v$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "$expected" ]; then
+            echo "Tag '$GITHUB_REF_NAME' does not equal '$expected' from package.json."
+            exit 1
+          fi
+          echo "Tag $GITHUB_REF_NAME matches package.json."
+      - name: Verify scripts, compatibility, and packaged assets
+        run: ./tests/test.sh
+      - name: Dry-run pack
+        run: npm pack --dry-run
+      - name: Pack and smoke test npx entry point
+        run: |
+          npm pack
+          TEST_HOME=$(mktemp -d)
+          HOME="$TEST_HOME" npx ./feature-docs-*.tgz all
+          for agent in claude cursor codex antigravity; do
+            case "$agent" in
+              claude) dir="$TEST_HOME/.claude/skills/feature-docs" ;;
+              cursor) dir="$TEST_HOME/.cursor/skills/feature-docs" ;;
+              codex) dir="$TEST_HOME/.codex/skills/feature-docs" ;;
+              antigravity) dir="$TEST_HOME/.gemini/config/skills/feature-docs" ;;
+            esac
+            test -d "$dir" || { echo "Missing $agent install at $dir"; exit 1; }
+            "$dir/scripts/feature-docs.sh" --help >/dev/null || { echo "$agent script failed"; exit 1; }
+          done
+          echo "npx smoke test passed for all agents"
+      - name: Run shellcheck
+        run: |
+          # Install shellcheck on macOS
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            brew install shellcheck
+          fi
+          shellcheck -S warning \
+            install.sh \
+            skills/feature-docs/scripts/feature-docs.sh \
+            tests/test.sh \
+            evals/run-trigger-eval.sh \
+            evals/extract-description.sh \
+            evals/check-trigger-phrases.sh \
+            evals/harness/lib.sh \
+            evals/harness/run-harness-eval.sh \
+            evals/harness/runners/claude.sh \
+            evals/harness/runners/cursor.sh \
+            tests/fixtures/harness-runner-missing
+
+  trigger-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify quoted trigger phrases
+        run: ./evals/check-trigger-phrases.sh
+      - name: Advisory IDF overlap smoke signal
+        run: ./evals/run-trigger-eval.sh --report
+
+  publish:
+    needs: [test, trigger-check]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          # Trusted publishing needs Node >= 22.14.0. Node 24 meets that.
+          # https://docs.npmjs.com/trusted-publishers (checked 2026-10-25)
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Use an npm release that supports trusted publishing
+        run: |
+          # Minimum is npm >= 11.5.1. npm 12.2.1 was the current release on
+          # 2026-10-25 and is above that minimum. No NPM_TOKEN is used.
+          # npm authenticates this job with GitHub Actions OIDC.
+          npm install -g npm@12.2.1
+          node -e '
+            function cmp(left, right) {
+              const a = left.split(".").map(Number);
+              const b = right.split(".").map(Number);
+              for (let i = 0; i < 3; i += 1) {
+                const diff = (a[i] || 0) - (b[i] || 0);
+                if (diff !== 0) return diff;
+              }
+              return 0;
+            }
+            const npmVersion = process.argv[1];
+            const nodeVersion = process.argv[2];
+            if (cmp(npmVersion, "11.5.1") < 0) {
+              console.error("npm " + npmVersion + " is below 11.5.1");
+              process.exit(1);
+            }
+            if (cmp(nodeVersion, "22.14.0") < 0) {
+              console.error("Node " + nodeVersion + " is below 22.14.0");
+              process.exit(1);
+            }
+            console.log("trusted publishing versions ok: npm " + npmVersion + ", node " + nodeVersion);
+          ' "$(npm --version)" "$(node --version | sed 's/^v//')"
+      - name: Publish to npm with provenance
+        run: npm publish --provenance --access public
