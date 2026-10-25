@@ -25,6 +25,27 @@ Opening a test file is code inspection. A passing test requires an execution res
 
 ## Commands
 
+### Installation and removal
+
+Install the skill from npm or a clone:
+
+```bash
+npx feature-docs@latest all                              # install to all supported agents
+npx feature-docs@latest claude --project .               # project install
+./install.sh all                                         # from a clone
+./install.sh cursor --project /path/to/repo              # project install from clone
+```
+
+Remove the skill when no longer needed:
+
+```bash
+npx feature-docs@latest --uninstall all                  # remove from all agents
+npx feature-docs@latest --uninstall claude --project .   # remove from project
+./install.sh --uninstall all --remove-legacy             # also remove old feature-init
+```
+
+### Script commands
+
 Use `skills/feature-docs/scripts/feature-docs.sh` from this repository, or `scripts/feature-docs.sh` inside an installed skill. The runtime is Bash and standard Unix utilities plus `shasum` or `sha256sum`; no Node, Python, or jq is required. Git enables private source snapshots for line-level diffs.
 
 Paths are relative to the target repository unless stated otherwise. `<feature>` is the kebab-case output folder name; it normally matches `.scratch/<feature>`.

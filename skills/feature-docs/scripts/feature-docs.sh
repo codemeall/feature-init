@@ -492,7 +492,7 @@ report() { # repo, slug, quiet, check|status
 }
 
 scan() { # check|status, then CLI args
-  local mode="$1" repo="${2:-}" slug="" quiet=0 result=0 found=0 dir name out rc sources="" src
+  local mode="$1" repo="${2:-}" slug="" quiet=0 result=0 found=0 dir name rc sources="" src
   shift
   check_repo "$repo"; shift
   while [[ $# -gt 0 ]]; do
