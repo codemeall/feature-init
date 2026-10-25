@@ -7,13 +7,17 @@ HARNESS_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 source "$HARNESS_DIR/lib.sh"
 
 cursor_bin() {
-  if command -v agent >/dev/null 2>&1; then
-    command -v agent
-    return 0
-  fi
   if command -v cursor-agent >/dev/null 2>&1; then
     command -v cursor-agent
     return 0
+  fi
+  if command -v agent >/dev/null 2>&1; then
+    local help
+    help="$(run_with_timeout 5 agent --help 2>/dev/null)" || return 1
+    if [[ "$help" == *"Start the Cursor Agent"* ]]; then
+      command -v agent
+      return 0
+    fi
   fi
   return 1
 }
@@ -21,7 +25,7 @@ cursor_bin() {
 probe() {
   local bin=""
   bin="$(cursor_bin)" || {
-    echo "cursor agent CLI is not on PATH (agent or cursor-agent)"
+    echo "cursor agent CLI is not on PATH (cursor-agent or a verified Cursor agent)"
     exit 3
   }
   if [[ -n "${CURSOR_API_KEY:-}" ]]; then
@@ -38,7 +42,7 @@ probe() {
   exit 3
 }
 
-run_cmd() {
+run_cmd() (
   local cwd="" trace="" prompt=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -58,14 +62,17 @@ run_cmd() {
   if [[ -n "${CURSOR_API_KEY:-}" ]]; then
     local home
     home="$(mktemp -d "${TMPDIR:-/tmp}/feature-docs-cursor-home.XXXXXX")"
+    trap 'rm -rf "$home"' EXIT
+    trap 'exit 143' TERM
+    trap 'exit 130' INT
     # A separate HOME hides skills already installed for the user.
     # CURSOR_API_KEY stays in the environment and is not printed.
-    env HOME="$home" "$bin" "${args[@]}" < /dev/null >"$trace" 2>"$trace.stderr" || rc=$?
-    rm -rf "$home"
+    env HOME="$home" "$bin" "${args[@]}" < /dev/null >"$trace" 2>"$trace.stderr" &
+    wait "$!" || rc=$?
     return "$rc"
   fi
   "$bin" "${args[@]}" < /dev/null >"$trace" 2>"$trace.stderr"
-}
+)
 
 cmd="${1:-}"
 shift || true

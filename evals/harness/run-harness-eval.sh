@@ -38,8 +38,9 @@ Custom runners implement:
   probe                         exit 0 when ready, exit 3 when the CLI or credentials are missing
   agent                         print claude, cursor, codex, or antigravity
   run --cwd DIR --trace FILE --prompt TEXT
-  skill-loaded --trace FILE --skill NAME --skill-dir DIR
+  skill-loaded --trace FILE --skill NAME --skill-dir DIR [--any-install]
                                 exit 0 loaded, 1 not loaded, 2 unreadable trace
+                                --any-install detects control contamination from other installs
 
 Examples:
   ./evals/harness/run-harness-eval.sh --runner claude
@@ -124,18 +125,18 @@ choose_runner() {
 ${reasons}"
 }
 
-choose_runner
-
 if ! command -v node >/dev/null 2>&1; then
   echo "Error: node is required to read the CLI trace. No scores were computed." >&2
   exit 2
 fi
+choose_runner
 [[ -f "$TRIGGERS" ]] || { echo "Error: missing $TRIGGERS" >&2; exit 2; }
 
 if [[ -z "$OUT" ]]; then
   OUT="$HARNESS_DIR/out/$(date -u +%Y%m%dT%H%M%SZ)"
 fi
 mkdir -p "$OUT/traces"
+OUT="$(cd "$OUT" && pwd -P)"
 OBS="$OUT/observations.jsonl"
 : > "$OBS"
 
@@ -146,6 +147,7 @@ case "$agent" in
 esac
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/feature-docs-harness.XXXXXX")"
+WORK="$(cd "$WORK" && pwd -P)"
 trap 'rm -rf "$WORK"' EXIT
 WITH_DIR="$WORK/with-skill"
 WITHOUT_DIR="$WORK/without-skill"
@@ -212,7 +214,7 @@ while IFS= read -r row; do
     [[ "$rc" -eq 1 ]] || fail_run "with-skill trace for prompt $index could not be read (exit $rc)"
   fi
   loaded_without=0
-  if bash "$RUNNER_PATH" skill-loaded --trace "$without_trace" --skill feature-docs --skill-dir "$SKILL_DIR"; then
+  if bash "$RUNNER_PATH" skill-loaded --trace "$without_trace" --skill feature-docs --skill-dir "$SKILL_DIR" --any-install; then
     loaded_without=1
   else
     rc=$?

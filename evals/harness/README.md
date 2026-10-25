@@ -19,7 +19,10 @@ The script does not invent a trace or a score. If the CLI or credentials are mis
 ./evals/harness/run-harness-eval.sh --runner cursor
 ```
 
+The Cursor runner prefers `cursor-agent`. A generic `agent` command is used only when its help identifies it as Cursor.
+
 `EVAL_TIMEOUT` is the per-prompt limit in seconds (default 180). This eval is not part of CI.
+The timeout supervisor stops the runner and its child processes together, allows one second for cleanup, then kills any remaining processes. Node is required on both macOS and Linux. Relative `--out` paths are resolved from the directory where the harness was started.
 
 ## Runner contract
 
@@ -29,10 +32,11 @@ A runner is an executable with four subcommands:
 probe
 agent
 run --cwd DIR --trace FILE --prompt TEXT
-skill-loaded --trace FILE --skill NAME --skill-dir DIR
+skill-loaded --trace FILE --skill NAME --skill-dir DIR [--any-install]
 ```
 
 `probe` exits 0 when the CLI and credentials are present, and 3 when they are not. `agent` prints `claude`, `cursor`, `codex`, or `antigravity` so the harness can install that target. `run` writes the CLI's JSONL trace to `--trace` and exits non-zero on failure. `skill-loaded` exits 0 when the trace shows a load, 1 when the trace finished and the skill did not load, and 2 when the trace cannot be read. Exit 2 is not a negative.
+Reads must match the selected installation. For the without-skill control, the harness passes `--any-install` so reads from a global or another project installation also invalidate the comparison. Writes and searches never count as loads.
 
 Pass a path to use your own runner:
 

@@ -52,7 +52,7 @@ claude_env() {
   printf '%s\n' "CLAUDE_CODE_SYNC_SKILLS=0"
 }
 
-run_cmd() {
+run_cmd() (
   local cwd="" trace="" prompt=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -68,6 +68,9 @@ run_cmd() {
   }
   local work env_file rc=0
   work="$(mktemp -d "${TMPDIR:-/tmp}/feature-docs-claude.XXXXXX")"
+  trap 'rm -rf "$work"' EXIT
+  trap 'exit 143' TERM
+  trap 'exit 130' INT
   env_file="$work/env"
   claude_env "$work" > "$env_file"
   local -a env_args=()
@@ -77,19 +80,18 @@ run_cmd() {
     env_args+=("$line")
   done < "$env_file"
   # stdout is the JSONL trace. stderr is kept beside it for debugging.
-  (
-    cd "$cwd" || exit 1
-    env "${env_args[@]}" claude -p "$prompt" \
-      --output-format stream-json \
-      --verbose \
-      --permission-mode dontAsk \
-      --permission-prompts none \
-      --allowedTools "Skill,Read" \
-      < /dev/null >"$trace" 2>"$trace.stderr"
-  ) || rc=$?
-  rm -rf "$work"
+  cd "$cwd" || exit 1
+  env "${env_args[@]}" claude -p "$prompt" \
+    --output-format stream-json \
+    --verbose \
+    --permission-mode dontAsk \
+    --permission-prompts none \
+    --allowedTools "Skill,Read" \
+    < /dev/null >"$trace" 2>"$trace.stderr" &
+  # wait is interruptible, so TERM can clean up even if the CLI ignores it.
+  wait "$!" || rc=$?
   return "$rc"
-}
+)
 
 cmd="${1:-}"
 shift || true

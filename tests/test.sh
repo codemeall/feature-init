@@ -576,14 +576,14 @@ TRACE_JS="$ROOT/evals/harness/trace.js"
 SKILL_TRACE_DIR="$TMP/skill-trace"
 mkdir -p "$SKILL_TRACE_DIR"
 run 0 node "$TRACE_JS" skill-loaded --trace "$ROOT/evals/harness/testdata/claude-skill-tool.jsonl" --skill feature-docs --skill-dir "$SKILL_TRACE_DIR"
-run 0 node "$TRACE_JS" skill-loaded --trace "$ROOT/evals/harness/testdata/claude-read-skill.jsonl" --skill feature-docs --skill-dir "$SKILL_TRACE_DIR"
+run 0 node "$TRACE_JS" skill-loaded --trace "$ROOT/evals/harness/testdata/claude-read-skill.jsonl" --skill feature-docs --skill-dir /tmp/proj/.claude/skills/feature-docs
 run 1 node "$TRACE_JS" skill-loaded --trace "$ROOT/evals/harness/testdata/claude-prose-only.jsonl" --skill feature-docs --skill-dir "$SKILL_TRACE_DIR"
 run 1 node "$TRACE_JS" skill-loaded --trace "$ROOT/evals/harness/testdata/claude-other-skill.jsonl" --skill feature-docs --skill-dir "$SKILL_TRACE_DIR"
 rc=0
 err="$(node "$TRACE_JS" skill-loaded --trace "$ROOT/evals/harness/testdata/claude-truncated.jsonl" --skill feature-docs --skill-dir "$SKILL_TRACE_DIR" 2>&1)" || rc=$?
 [[ "$rc" -eq 2 ]] || fail "truncated trace exited $rc, expected 2: $err"
 contains "$err" "trace has no result event"
-run 0 node "$TRACE_JS" skill-loaded --trace "$ROOT/evals/harness/testdata/cursor-read.jsonl" --skill feature-docs --skill-dir "$SKILL_TRACE_DIR"
+run 0 node "$TRACE_JS" skill-loaded --trace "$ROOT/evals/harness/testdata/cursor-read.jsonl" --skill feature-docs --skill-dir /tmp/proj/.cursor/skills/feature-docs
 run 1 node "$TRACE_JS" skill-loaded --trace "$ROOT/evals/harness/testdata/cursor-mention.jsonl" --skill feature-docs --skill-dir "$SKILL_TRACE_DIR"
 pass "skill load is read from the tool trace, not from reply text"
 
@@ -630,5 +630,8 @@ contains "$out" "did not score any prompts"
 contains "$out" "./evals/harness/run-harness-eval.sh --runner claude"
 lacks "$out" '"precision"'
 pass "harness skips cleanly when the runner has no CLI and does not invent scores"
+
+node --test "$ROOT/tests/harness.test.js"
+pass "harness rejects false loads, terminates descendants, and supports relative output paths"
 
 printf '1..%d\n' "$passes"

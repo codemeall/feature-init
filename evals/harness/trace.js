@@ -11,7 +11,7 @@ function usage() {
   process.stderr.write(
     [
       "Usage:",
-      "  trace.js skill-loaded --trace FILE --skill NAME --skill-dir DIR",
+      "  trace.js skill-loaded --trace FILE --skill NAME --skill-dir DIR [--any-install]",
       "  trace.js score OBSERVATIONS.json",
       "  trace.js report --observations FILE --status STATUS --runner NAME --out DIR [--error TEXT]",
       "",
@@ -40,11 +40,11 @@ function normalizeSkillName(value) {
   return value.replace(/^\//, "").trim();
 }
 
-function isSkillFile(skill, skillDir, value) {
+function isSkillFile(skill, skillDir, value, anyInstall) {
   if (typeof value !== "string" || value === "") return false;
   const norm = value.replace(/\\/g, "/");
   const dir = skillDir.replace(/\\/g, "/").replace(/\/$/, "");
-  return norm === `${dir}/SKILL.md` || norm.endsWith(`/skills/${skill}/SKILL.md`);
+  return norm === `${dir}/SKILL.md` || (anyInstall && norm.endsWith(`/skills/${skill}/SKILL.md`));
 }
 
 function readTrace(file) {
@@ -91,7 +91,7 @@ function scan(value, skill, skillDir, state) {
     typeof value.input === "object"
   ) {
     for (const key of PATH_KEYS) {
-      if (isSkillFile(skill, skillDir, value.input[key])) state.loaded = true;
+      if (isSkillFile(skill, skillDir, value.input[key], state.anyInstall)) state.loaded = true;
     }
   }
 
@@ -99,8 +99,10 @@ function scan(value, skill, skillDir, state) {
     for (const [toolName, call] of Object.entries(value.tool_call)) {
       if (!call || typeof call !== "object") continue;
       const args = call.args && typeof call.args === "object" ? call.args : {};
-      for (const key of PATH_KEYS) {
-        if (isSkillFile(skill, skillDir, args[key])) state.loaded = true;
+      if (toolName === "readToolCall") {
+        for (const key of PATH_KEYS) {
+          if (isSkillFile(skill, skillDir, args[key], state.anyInstall)) state.loaded = true;
+        }
       }
       if (String(toolName).toLowerCase().includes("skill")) {
         for (const key of SKILL_INPUT_KEYS) {
@@ -122,7 +124,7 @@ function skillLoaded(argv) {
     process.stderr.write(`${read.error}\n`);
     process.exit(2);
   }
-  const state = { loaded: false, sawResult: false };
+  const state = { loaded: false, sawResult: false, anyInstall: argv.includes("--any-install") };
   for (const event of read.events) scan(event, skill, skillDir, state);
   if (!state.sawResult) {
     process.stderr.write("trace has no result event\n");
