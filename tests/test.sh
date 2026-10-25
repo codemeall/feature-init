@@ -66,21 +66,48 @@ digest() {
   if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
   else sha256sum "$1" | cut -d' ' -f1; fi
 }
+digest_stream() {
+  if command -v shasum >/dev/null 2>&1; then shasum -a 256 | cut -d' ' -f1
+  else sha256sum | cut -d' ' -f1; fi
+}
+# Hash every path in the target repo, including private snapshots under .git.
+tree_digest() {
+  local root="$1"
+  (
+    cd "$root" || exit 1
+    find . | LC_ALL=C sort | while IFS= read -r path; do
+      if [[ -L "$path" ]]; then
+        printf 'link\t%s\t%s\n' "$path" "$(readlink "$path")"
+      elif [[ -f "$path" ]]; then
+        printf 'file\t%s\t%s\n' "$path" "$(digest "$path")"
+      elif [[ -d "$path" ]]; then
+        printf 'dir\t%s\n' "$path"
+      else
+        printf 'other\t%s\n' "$path"
+      fi
+    done | digest_stream
+  )
+}
 
 cd "$ROOT"
-bash -n install.sh "$FD" tests/test.sh
+bash -n install.sh "$FD" tests/test.sh \
+  evals/extract-description.sh evals/check-trigger-phrases.sh evals/run-trigger-eval.sh \
+  evals/harness/lib.sh evals/harness/run-harness-eval.sh \
+  evals/harness/runners/claude.sh evals/harness/runners/cursor.sh \
+  tests/fixtures/harness-runner-missing
 for name in SKILL.md assets/templates/overview.md assets/templates/decisions.md assets/templates/tickets.md references/convert.md references/example.md references/setup.md references/sources.md; do
   [[ -f "$SKILL/$name" ]] || fail "missing resource: $name"
 done
 pass "shell entrypoints parse and portable skill resources exist"
-description="$(sed -n '/^---$/,/^---$/p' "$SKILL/SKILL.md" | sed -n '/^description:/,/^[a-z][a-z]*:/p' | sed '$d' | sed 's/^description:[[:space:]]*>-[[:space:]]*//' | sed 's/^[[:space:]]*//' | tr '\n' ' ' | sed 's/  */ /g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+description="$(bash "$ROOT/evals/extract-description.sh")"
 description_length="${#description}"
 [[ "$description_length" -le 1024 ]] || fail "SKILL.md description is $description_length chars, exceeds 1024 char limit"
 [[ "$description" == "Writes, converts, syncs and looks up"* ]] || fail "SKILL.md description should start with 'Writes, converts, syncs and looks up'"
 contains "$description" "Use when"
-contains "$description" "write the feature docs"
-contains "$description" "sync the feature docs"
-pass "SKILL.md description is under 1024 chars, contains 'Use when' and trigger phrases, and starts with exact opening"
+pass "SKILL.md description is under 1024 chars, contains 'Use when', and starts with the exact opening"
+phrase_out="$(bash "$ROOT/evals/check-trigger-phrases.sh")" || fail "quoted trigger phrase check failed: $phrase_out"
+contains "$phrase_out" "All quoted trigger phrases present"
+pass "quoted trigger phrases match the CI check"
 for doc in README.md USAGE.md CHANGELOG.md; do
   while IFS= read -r link; do [[ -z "$link" || -e "$ROOT/$link" ]] || fail "$doc links to $link"; done < <(grep -oE '\]\(\./[^)#]*' "$doc" | sed 's/^](//' | sort -u || true)
 done
@@ -305,42 +332,52 @@ done
 cp "$TMP/legacy-safe-upgrade" "$legacy_manifest"
 pass "legacy dot and slash spellings preserve drift detection and safely upgrade with or without local sources"
 
-# Issue #3: Reformatted manifest should exit 2 with clear error
-REFORMATTED="$TMP/reformatted"
-make_repo "$REFORMATTED"
-reformatted_docs="$REFORMATTED/docs/csv-export/feature-docs"
-run 0 stamp "$REFORMATTED" >/dev/null
-reformatted_manifest="$reformatted_docs/sources.json"
-cp "$reformatted_manifest" "$TMP/manifest.valid"
-# Test compact JSON (jq -c)
-if command -v jq >/dev/null 2>&1; then
-  jq -c . "$TMP/manifest.valid" > "$reformatted_manifest"
-else
-  # Compact JSON without jq: remove newlines and collapse spaces
-  cat "$TMP/manifest.valid" | tr -d '\n' | sed 's/  */ /g' > "$reformatted_manifest"
-fi
-cp "$reformatted_manifest" "$TMP/compact.json"
-rc=0
-out="$(bash "$FD" status "$REFORMATTED" csv-export 2>&1)" || rc=$?
-[[ $rc -eq 2 ]] || fail "status on compact manifest exited $rc, expected 2"
-contains "$out" "sources.json is not in the script-owned layout"
-contains "$out" "restore it from git, or delete sources.json and stamp again with --evidence"
-cmp "$reformatted_manifest" "$TMP/compact.json" || fail "reformatted manifest check changed the file"
-# Test reindented JSON (different spacing)
-sed 's/^  /    /' "$TMP/manifest.valid" > "$reformatted_manifest"
-cp "$reformatted_manifest" "$TMP/reindented.json"
-rc=0
-out="$(bash "$FD" stamp "$REFORMATTED" csv-export 2>&1)" || rc=$?
-[[ $rc -eq 2 ]] || fail "stamp on reindented manifest exited $rc, expected 2"
-contains "$out" "sources.json is not in the script-owned layout"
-contains "$out" "restore it from git, or delete sources.json and stamp again with --evidence"
-cmp "$reformatted_manifest" "$TMP/reindented.json" || fail "stamp on reformatted manifest changed the file"
-# Test that deleting sources.json and stamping again succeeds
-rm "$reformatted_manifest"
-run 0 bash "$FD" stamp "$REFORMATTED" csv-export --evidence src/export.js --evidence tests/export.test.js >/dev/null
-[[ -f "$reformatted_manifest" ]] || fail "stamp after deleting sources.json did not create new manifest"
-cp "$TMP/manifest.valid" "$reformatted_manifest"
-pass "reformatted manifest exits 2 with clear error and does not change files"
+# Issue #3: compact and reindented manifests, against both status and stamp.
+REFORMAT_BASE="$TMP/reformat-base"
+make_repo "$REFORMAT_BASE"
+run 0 stamp "$REFORMAT_BASE" >/dev/null
+cp "$REFORMAT_BASE/docs/csv-export/feature-docs/sources.json" "$TMP/manifest.valid"
+layout_error="sources.json is not in the script-owned layout"
+layout_hint="restore it from git, or delete sources.json and stamp again with --evidence"
+write_compact_manifest() {
+  if command -v jq >/dev/null 2>&1; then jq -c . "$TMP/manifest.valid"
+  else tr -d '\n' < "$TMP/manifest.valid" | sed 's/  */ /g; s/^[[:space:]]*//; s/[[:space:]]*$//'; fi
+}
+write_reindented_manifest() { sed 's/^  /    /' "$TMP/manifest.valid"; }
+for shape in compact reindented; do
+  for cmd in status stamp; do
+    repo="$TMP/reformat-$shape-$cmd"
+    cp -R "$REFORMAT_BASE" "$repo"
+    manifest="$repo/docs/csv-export/feature-docs/sources.json"
+    if [[ "$shape" == compact ]]; then write_compact_manifest > "$manifest"
+    else write_reindented_manifest > "$manifest"; fi
+    cmp -s "$manifest" "$TMP/manifest.valid" && fail "$shape manifest is still canonical"
+    before="$(tree_digest "$repo")"
+    [[ "${#before}" -eq 64 ]] || fail "tree digest failed before $shape $cmd"
+    # This file uses set -e, so a bare failing stamp would abort before the
+    # tree hash. rc=0 and `|| rc=$?` keep the caller alive and store the status.
+    # feature-docs.sh forces that status to 2: stamp does
+    # `validate_manifest || exit 2`, and status does `validate_manifest || return 2`.
+    # The assertion checks that forced code, not whatever awk returned on its own.
+    rc=0
+    out="$(bash "$FD" "$cmd" "$repo" csv-export 2>&1)" || rc=$?
+    after="$(tree_digest "$repo")"
+    [[ "$rc" -eq 2 ]] || fail "$shape $cmd exited $rc, expected 2: $out"
+    contains "$out" "$layout_error"
+    contains "$out" "$layout_hint"
+    lacks "$out" "REVIEW REQUIRED"
+    [[ "$before" == "$after" ]] || fail "$shape $cmd changed the target tree"
+    pass "$shape manifest $cmd exits 2, names the layout error, and leaves the tree unchanged"
+  done
+done
+RECOVER="$TMP/reformat-recover"
+cp -R "$REFORMAT_BASE" "$RECOVER"
+recover_manifest="$RECOVER/docs/csv-export/feature-docs/sources.json"
+write_compact_manifest > "$recover_manifest"
+rm "$recover_manifest"
+run 0 bash "$FD" stamp "$RECOVER" csv-export --evidence src/export.js --evidence tests/export.test.js >/dev/null
+[[ -f "$recover_manifest" ]] || fail "stamp after deleting sources.json did not create a manifest"
+pass "deleting a reformatted manifest and stamping with evidence writes a new baseline"
 
 # The same relative key in three maps must keep three separate meanings.
 SCOPED="$TMP/scoped"
@@ -506,7 +543,7 @@ for agent in claude cursor codex antigravity; do
   esac
   [[ -d "$dir" ]] || fail "global install did not create $agent at $dir"
 done
-HOME="$GLOBAL_HOME" run 0 bash "$ROOT/install.sh" --uninstall all >/dev/null
+out="$(HOME="$GLOBAL_HOME" bash "$ROOT/install.sh" --uninstall all 2>&1)" || fail "first global uninstall failed: $out"
 for agent in claude cursor codex antigravity; do
   case "$agent" in
     claude) dir="$GLOBAL_HOME/.claude/skills/feature-docs" ;;
@@ -514,8 +551,87 @@ for agent in claude cursor codex antigravity; do
     codex) dir="$GLOBAL_HOME/.codex/skills/feature-docs" ;;
     antigravity) dir="$GLOBAL_HOME/.gemini/config/skills/feature-docs" ;;
   esac
+  contains "$out" "removed   $agent:"
   [[ ! -e "$dir" ]] || fail "global uninstall did not remove $agent from $dir"
 done
-pass "global-install uninstall removes feature-docs from all targets"
+pass "global-install uninstall removes feature-docs from all four targets"
+rc=0
+out="$(HOME="$GLOBAL_HOME" bash "$ROOT/install.sh" --uninstall all 2>&1)" || rc=$?
+[[ "$rc" -eq 0 ]] || fail "second global uninstall exited $rc, expected 0: $out"
+contains "$out" "Nothing to uninstall"
+lacks "$out" "removed"
+for agent in claude cursor codex antigravity; do
+  case "$agent" in
+    claude) dir="$GLOBAL_HOME/.claude/skills/feature-docs" ;;
+    cursor) dir="$GLOBAL_HOME/.cursor/skills/feature-docs" ;;
+    codex) dir="$GLOBAL_HOME/.codex/skills/feature-docs" ;;
+    antigravity) dir="$GLOBAL_HOME/.gemini/config/skills/feature-docs" ;;
+  esac
+  [[ ! -e "$dir" ]] || fail "second global uninstall recreated $agent at $dir"
+done
+pass "second global uninstall exits 0 and reports nothing to uninstall"
+
+command -v node >/dev/null 2>&1 || fail "node is required for harness trace tests"
+TRACE_JS="$ROOT/evals/harness/trace.js"
+SKILL_TRACE_DIR="$TMP/skill-trace"
+mkdir -p "$SKILL_TRACE_DIR"
+run 0 node "$TRACE_JS" skill-loaded --trace "$ROOT/evals/harness/testdata/claude-skill-tool.jsonl" --skill feature-docs --skill-dir "$SKILL_TRACE_DIR"
+run 0 node "$TRACE_JS" skill-loaded --trace "$ROOT/evals/harness/testdata/claude-read-skill.jsonl" --skill feature-docs --skill-dir /tmp/proj/.claude/skills/feature-docs
+run 1 node "$TRACE_JS" skill-loaded --trace "$ROOT/evals/harness/testdata/claude-prose-only.jsonl" --skill feature-docs --skill-dir "$SKILL_TRACE_DIR"
+run 1 node "$TRACE_JS" skill-loaded --trace "$ROOT/evals/harness/testdata/claude-other-skill.jsonl" --skill feature-docs --skill-dir "$SKILL_TRACE_DIR"
+rc=0
+err="$(node "$TRACE_JS" skill-loaded --trace "$ROOT/evals/harness/testdata/claude-truncated.jsonl" --skill feature-docs --skill-dir "$SKILL_TRACE_DIR" 2>&1)" || rc=$?
+[[ "$rc" -eq 2 ]] || fail "truncated trace exited $rc, expected 2: $err"
+contains "$err" "trace has no result event"
+run 0 node "$TRACE_JS" skill-loaded --trace "$ROOT/evals/harness/testdata/cursor-read.jsonl" --skill feature-docs --skill-dir /tmp/proj/.cursor/skills/feature-docs
+run 1 node "$TRACE_JS" skill-loaded --trace "$ROOT/evals/harness/testdata/cursor-mention.jsonl" --skill feature-docs --skill-dir "$SKILL_TRACE_DIR"
+pass "skill load is read from the tool trace, not from reply text"
+
+cat > "$TMP/observations.json" <<'JSON'
+[
+  {"expected":"trigger","loaded_with_skill":true,"loaded_without_skill":false,"prompt":"a"},
+  {"expected":"trigger","loaded_with_skill":false,"loaded_without_skill":false,"prompt":"b"},
+  {"expected":"near_miss","loaded_with_skill":true,"loaded_without_skill":false,"prompt":"c"},
+  {"expected":"near_miss","loaded_with_skill":false,"loaded_without_skill":false,"prompt":"d"}
+]
+JSON
+node "$TRACE_JS" score "$TMP/observations.json" | node -e '
+const fs = require("node:fs");
+const score = JSON.parse(fs.readFileSync(0, "utf8"));
+if (score.precision !== 0.5 || score.recall !== 0.5) process.exit(1);
+if (score.true_positive !== 1 || score.false_positive !== 1 || score.false_negative !== 1 || score.true_negative !== 1) process.exit(1);
+if (score.contaminated !== false) process.exit(1);
+' || fail "precision and recall formula"
+cat > "$TMP/contaminated.json" <<'JSON'
+[{"expected":"trigger","loaded_with_skill":true,"loaded_without_skill":true,"prompt":"a"}]
+JSON
+node "$TRACE_JS" score "$TMP/contaminated.json" | node -e '
+const fs = require("node:fs");
+const score = JSON.parse(fs.readFileSync(0, "utf8"));
+if (score.contaminated !== true || score.precision !== null || score.recall !== null) process.exit(1);
+' || fail "contaminated runs must not invent precision or recall"
+report_dir="$TMP/harness-report"
+node "$TRACE_JS" report --observations "$TMP/observations.json" --status complete --runner fixture --out "$report_dir" >/dev/null
+contains "$(cat "$report_dir/summary.md")" "Precision: 0.5000"
+contains "$(cat "$report_dir/summary.md")" "Recall: 0.5000"
+contains "$(cat "$report_dir/results.json")" '"precision": 0.5'
+report_rc=0
+node "$TRACE_JS" report --observations "$TMP/contaminated.json" --status complete --runner fixture --out "$TMP/harness-contaminated" >/dev/null || report_rc=$?
+[[ "$report_rc" -eq 2 ]] || fail "contaminated report exited $report_rc, expected 2"
+contains "$(cat "$TMP/harness-contaminated/results.json")" '"precision": null'
+contains "$(cat "$TMP/harness-contaminated/summary.md")" "Precision: not computed"
+pass "harness score formula reports precision and recall, and withholds both when contaminated"
+
+rc=0
+out="$(bash "$ROOT/evals/harness/run-harness-eval.sh" --runner "$ROOT/tests/fixtures/harness-runner-missing" 2>&1)" || rc=$?
+[[ "$rc" -eq 0 ]] || fail "missing runner skip exited $rc: $out"
+contains "$out" "SKIP:"
+contains "$out" "did not score any prompts"
+contains "$out" "./evals/harness/run-harness-eval.sh --runner claude"
+lacks "$out" '"precision"'
+pass "harness skips cleanly when the runner has no CLI and does not invent scores"
+
+node --test "$ROOT/tests/harness.test.js"
+pass "harness rejects false loads, terminates descendants, and supports relative output paths"
 
 printf '1..%d\n' "$passes"

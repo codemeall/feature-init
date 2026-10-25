@@ -2,12 +2,23 @@
 
 ## Unreleased (planned 2.0.1)
 
+- Fix: harness timeouts stop agent descendants on macOS and Linux, trace loads require read operations from the selected installation, and relative output paths work with the Claude runner.
+- Fix: the without-skill control detects globally installed skill loads, and the Cursor runner avoids unrelated programs named `agent`.
+- Note: Node 18 support was dropped because Node 18 is end of life. Node 20 is the minimum. Engines stay `>=20`, and CI stays on Node 20, 22, and 24.
 - Fix: incomplete docs with no `--evidence` now exit 2 (usage error) instead of 1, and both the structural findings and the evidence requirement are reported in the same run.
 - Fix: restore third-person SKILL.md description with trigger phrases for better skill discovery.
 - Add: `--uninstall` flag to remove feature-docs skill from specified agents.
 - Add: `--remove-legacy` flag to also remove old feature-init skill when uninstalling.
 - Fix: `--force` now prints "replaced" message when overwriting existing install.
 - Fix: reformatted sources.json manifest now exits 2 with clear error message suggesting restore from git or delete and re-stamp.
+- Add: trigger evaluation with evals/triggers.json and evals/run-trigger-eval.sh for testing skill triggering.
+- Note: the trigger eval is advisory. It is a static smoke signal and cannot separate feature docs from ticket creation.
+- Add: a harness eval under `evals/harness/` that runs each prompt through a real agent CLI with the skill installed and without it. Skill loads come from the CLI trace. It writes precision, recall, and per-prompt results, skips when no CLI or credentials are present, and is not part of required CI.
+- Test: compact and reindented manifests are checked with both `status` and `stamp`. Each case expects exit 2, the layout error, and an unchanged target tree.
+- Test: a second global uninstall under a temp HOME exits 0 and reports that there is nothing to uninstall.
+- Test: the quoted trigger phrase check runs in `tests/test.sh`. Description extraction is shared by CI and the advisory overlap script.
+- Add: CI matrix testing on ubuntu-latest and macos-latest with Node 20, 22, 24.
+- Fix: update engines to Node >=20 and document bash requirement.
 
 ## 2026-10-23, 2.0.0: evidence-backed feature records
 

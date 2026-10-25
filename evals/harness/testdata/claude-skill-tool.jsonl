@@ -1,0 +1,2 @@
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Skill","input":{"command":"feature-docs"}}]}}
+{"type":"result","subtype":"success","result":"done"}

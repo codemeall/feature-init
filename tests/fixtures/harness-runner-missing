@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Fixture runner used by tests/test.sh. It has no CLI, so the harness must skip.
+set -euo pipefail
+case "${1:-}" in
+  probe)
+    echo "fixture: cli not installed"
+    exit 3
+    ;;
+  agent)
+    printf '%s\n' claude
+    ;;
+  *)
+    echo "fixture runner cannot run an agent" >&2
+    exit 3
+    ;;
+esac

@@ -1,0 +1,2 @@
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I loaded the feature-docs skill and will write the feature docs."}]}}
+{"type":"result","subtype":"success","result":"I used feature-docs"}

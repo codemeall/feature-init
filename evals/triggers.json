@@ -1,0 +1,30 @@
+{
+  "should_trigger": [
+    "write the feature docs for csv-export",
+    "document this feature",
+    "write feature docs for the billing module",
+    "sync the feature docs",
+    "sync the csv-export feature docs",
+    "convert these docs to feature docs",
+    "convert docs/user-auth into feature docs",
+    "what did we decide about the delimiter",
+    "what did we decide about X",
+    "look up the decisions for this feature",
+    "reconcile the feature docs with the latest changes",
+    "update the feature documentation after these changes"
+  ],
+  "should_not_trigger": [
+    "write a spec for csv-export",
+    "create tickets for this feature",
+    "update the README",
+    "write unit tests",
+    "add documentation to the code",
+    "create an ADR for this decision",
+    "update the changelog",
+    "write API documentation",
+    "create a design doc",
+    "add inline comments to explain this function",
+    "generate JSDoc comments",
+    "write a tutorial"
+  ]
+}

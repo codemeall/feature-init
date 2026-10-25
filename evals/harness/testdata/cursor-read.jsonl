@@ -1,0 +1,2 @@
+{"type":"tool_call","subtype":"completed","tool_call":{"readToolCall":{"args":{"path":"/tmp/proj/.cursor/skills/feature-docs/SKILL.md"}}}}
+{"type":"result","subtype":"success","result":"done"}
