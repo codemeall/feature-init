@@ -4,7 +4,9 @@
 
 When a feature is built from a spec and tickets that live in `.scratch/`, the code reaches git and the reasoning does not. `feature-docs` is an agent skill that writes the reasoning down next to the code: one folder per feature, `docs/<feature>/feature-docs/`, describing what exists, why, what remains, and what was verified. It converts existing docs, reconciles changes, and points later agents at the record before they change the feature.
 
-The skill was called `feature-init` until 2026-10-06, and this repository still carries that name. See [Upgrading](./CHANGELOG.md#upgrading).
+The npm package is named `feature-docs`. The GitHub repository is named `feature-init`. Neither name is being changed. The skill was called `feature-init` until 2026-10-06. See [Upgrading](./CHANGELOG.md#upgrading).
+
+Version 2.0.0 was published to npm without npm provenance. The registry record for `feature-docs@2.0.0` has no provenance attestation.
 
 ## Why this exists
 
@@ -106,6 +108,8 @@ The agent reads `overview.md` for context, then `decisions.md` before proposing 
 ## Install
 
 The skill follows the [SKILL.md standard](https://agentskills.io) that Claude Code, Cursor, Codex and Antigravity read natively.
+
+Node 20 is the minimum for the `npx` commands below. `package.json` engines is `>=20`. The same commands work on macOS and Linux. The clone path uses `bash` and does not need Node.
 
 ```bash
 npx skills add codemeall/feature-init --skill feature-docs -g   # all projects
@@ -218,18 +222,34 @@ The trigger overlap script is an advisory smoke signal. It prints coverage and m
 ./evals/run-trigger-eval.sh --report
 ```
 
-The harness eval runs each prompt in `evals/triggers.json` through a real agent CLI, once with the skill installed and once without. It records a skill load only from the CLI tool trace, then writes precision, recall, and a per-prompt summary. It is not part of CI. If the CLI or credentials are missing it prints `SKIP` and exits 0, and it does not invent scores.
+The harness eval runs each prompt in `evals/triggers.json` through a real agent CLI, once with the skill installed and once without. It records a skill load only from the CLI tool trace, then writes precision, recall, and a per-prompt summary when it actually runs. It is not part of CI. If the CLI or credentials are missing it prints `SKIP` and exits 0, and it does not invent scores. No scored harness run is part of this release.
 ```bash
 ./evals/harness/run-harness-eval.sh --runner claude
 ./evals/harness/run-harness-eval.sh --runner cursor
 ```
 See [evals/harness/README.md](./evals/harness/README.md).
 
+## What is measured
+
+Measured:
+
+- The test suite, `./tests/test.sh` (this includes the quoted trigger phrase check).
+- The CI matrix in `.github/workflows/test.yml`: ubuntu-latest and macos-latest, each with Node 20, 22, and 24.
+- The advisory overlap scorer, `./evals/run-trigger-eval.sh`. It is a smoke signal. It does not decide whether the skill should trigger.
+
+Not measured:
+
+- Real-agent trigger precision and recall. See [issue #5](https://github.com/codemeall/feature-init/issues/5). A harness eval exists under `evals/harness/`, but it is unscored.
+
 ## System requirements
 
 Requires bash, git, awk, and `shasum` or `sha256sum`. Windows requires WSL or Git Bash.
 
 Node 18 support was dropped because Node 18 is end of life. Node 20 is the minimum for the npx entry point (`package.json` engines is `>=20`). CI runs the test suite on Node 20, 22, and 24 for both Ubuntu and macOS.
+
+## Security
+
+Report a vulnerability privately. See [SECURITY.md](./SECURITY.md).
 
 ## License
 
