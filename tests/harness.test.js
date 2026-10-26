@@ -6,6 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { test } = require("node:test");
+const { earlyStopReason } = require("../evals/harness/trace.js");
 
 const root = path.resolve(__dirname, "..");
 const harness = path.join(root, "evals/harness");
@@ -253,6 +254,10 @@ else if (mode === "load-then-hang") {
 } else if (mode === "busy-then-hang") {
   for (let i = 0; i < 10; i++) say({type:"tool_call",subtype:"started",tool_call:{lsToolCall:{args:{path:ws}}}});
   setInterval(() => {}, 1000);
+} else if (mode === "foreign-then-tools") {
+  say({type:"tool_call",subtype:"started",tool_call:{readToolCall:{args:{path:"/other/project/.cursor/skills/feature-docs/SKILL.md"}}}});
+  for (let i = 0; i < 6; i++) say({type:"tool_call",subtype:"started",tool_call:{lsToolCall:{args:{path:ws}}}});
+  setInterval(() => {}, 1000);
 } else {
   if (fs.existsSync(skill)) say({type:"tool_call",subtype:"started",tool_call:{readToolCall:{args:{path:skill}}}});
   say({type:"result",subtype:"success",usage:{inputTokens:10,outputTokens:2}});
@@ -366,6 +371,8 @@ test("early stop ends a run at the first skill load, and after N tool calls with
     assert.ok(Date.now() - started < 30000, "early stop did not end the run");
     const report = JSON.parse(fs.readFileSync(path.join(dir, "out/results.json"), "utf8"));
     assert.equal(report.skipped, 0, JSON.stringify(report.results));
+    assert.equal(report.stop_after_tools, 4);
+    assert.match(fs.readFileSync(path.join(dir, "out/summary.md"), "utf8"), /Stop after tools: 4/);
     const trigger = report.results.find((r) => r.expected === "trigger");
     assert.equal(trigger.loaded_with_skill, loaded, mode);
     assert.equal(trigger.loaded_without_skill, false);
@@ -414,6 +421,45 @@ test("min-scored 0 with zero scored rows is incomplete, not partial", (t) => {
   assert.equal(body.scored, 0);
   assert.equal(result.status, 3, result.stderr);
   assert.match(summary, /Precision: not computed/);
+});
+
+test("results record the stop-after-tools value that was used", (t) => {
+  const rows = [
+    { expected: "trigger", loaded_with_skill: true, loaded_without_skill: false, prompt: "one" },
+    { expected: "near_miss", loaded_with_skill: false, loaded_without_skill: false, prompt: "two" },
+  ];
+  const { result, body, summary } = reportEval(t, rows, ["--stop-after-tools", "4", "--min-scored", "0"]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(body.status, "complete");
+  assert.equal(body.stop_after_tools, 4);
+  assert.match(summary, /Stop after tools: 4/);
+});
+
+test("a read of a different installation does not end the with-skill run early", () => {
+  const selected = "/tmp/ws/.cursor/skills/feature-docs";
+  const events = [
+    { type: "tool_call", subtype: "started", tool_call: { readToolCall: { args: { path: "/other/project/.cursor/skills/feature-docs/SKILL.md" } } } },
+  ];
+  for (let i = 0; i < 4; i += 1) {
+    events.push({ type: "tool_call", subtype: "started", tool_call: { lsToolCall: { args: { path: "/tmp/ws" } } } });
+  }
+  assert.equal(earlyStopReason(events, "feature-docs", 4, { anyInstall: false, skillDir: selected }), "tool_limit");
+  assert.equal(earlyStopReason(events, "feature-docs", 4, { anyInstall: true, skillDir: selected }), "skill_loaded");
+  const selectedRead = [{ type: "tool_call", subtype: "started", tool_call: { readToolCall: { args: { path: `${selected}/SKILL.md` } } } }];
+  assert.equal(earlyStopReason(selectedRead, "feature-docs", 4, { anyInstall: false, skillDir: selected }), "skill_loaded");
+});
+
+test("harness early stop uses the same install the scorer uses", (t) => {
+  const { dir, env } = fakeCursorEnv(t, { FAKE_MODE: "foreign-then-tools" });
+  const result = runHarness(dir, env, ["--timeout", "60", "--max-prompts", "1", "--stop-after-tools", "4"]);
+  const report = JSON.parse(fs.readFileSync(path.join(dir, "out/results.json"), "utf8"));
+  const trigger = report.results.find((r) => r.expected === "trigger");
+  assert.equal(trigger.loaded_with_skill, false);
+  assert.equal(trigger.early_stop_with, "tool_limit");
+  assert.equal(trigger.loaded_without_skill, true);
+  assert.equal(trigger.early_stop_without, "skill_loaded");
+  assert.equal(report.stop_after_tools, 4);
+  assert.equal(result.status, 2, result.stderr);
 });
 
 test("a full run that clears the floor and both classes still reports rates", (t) => {

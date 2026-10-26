@@ -209,6 +209,8 @@ function report(argv) {
   const minScored = Number(optionalFlag(argv, "--min-scored") || "0.8");
   const maxPrompts = Number(optionalFlag(argv, "--max-prompts") || "0");
   const catalogSize = Number(optionalFlag(argv, "--catalog-size") || "0");
+  const stopAfterToolsText = optionalFlag(argv, "--stop-after-tools");
+  const stopAfterTools = stopAfterToolsText === "" ? null : Number(stopAfterToolsText);
   const rows = readObservations(observationsFile).map((row) => ({ ...row, outcome: row.skipped ? "skipped" : outcome(row) }));
   const scoredRows = rows.filter((row) => !row.skipped);
   const skippedCount = rows.length - scoredRows.length;
@@ -258,6 +260,7 @@ function report(argv) {
     scored: scoredRows.length,
     skipped: skippedCount,
     min_scored: minScored,
+    stop_after_tools: stopAfterTools,
     usage,
     true_positive: metrics.true_positive,
     false_positive: metrics.false_positive,
@@ -275,15 +278,18 @@ function report(argv) {
     "",
     `Runner: ${runner}`,
     `Model: ${model || "CLI default"}`,
+    `Stop after tools: ${stopAfterTools === null ? "not set" : stopAfterTools}`,
     `Status: ${status}`,
-    error ? `Error: ${error}` : "",
+  ];
+  if (error) lines.push(`Error: ${error}`);
+  lines.push(
     "",
     `Scored: ${scoredRows.length} of ${rows.length} prompts. Skipped: ${skippedCount}.`,
     `Usage: ${usage.input_tokens} input, ${usage.output_tokens} output, ${usage.cache_read_tokens} cache read tokens from ${usage.runs_with_usage} of ${usage.runs} runs. Early stopped runs report no usage. USD cost is not in the trace.`,
     "Skipped prompts (timeout, runner failure, unreadable trace) are left out of precision and recall.",
     `Status incomplete means fewer than ${Math.round(minScored * 100)}% of prompts were scored, a class has no scored row, or nothing scored, so no rates are claimed. Partial means some were skipped and both classes scored.`,
     "",
-  ];
+  );
   if (status === "smoke") {
     lines.push("Smoke: --max-prompts truncated the prompt set. Precision and recall are not claimed.");
   } else {
@@ -310,7 +316,7 @@ function report(argv) {
   }
   if (rows.length === 0) lines.push("| | | | | | no completed prompts |");
   lines.push("");
-  fs.writeFileSync(path.join(outDir, "summary.md"), `${lines.filter((line, index) => !(index === 5 && line === "")).join("\n")}\n`);
+  fs.writeFileSync(path.join(outDir, "summary.md"), `${lines.join("\n")}\n`);
   process.stdout.write(`status ${status}\n`);
   process.stdout.write(`precision ${formatRate(body.precision)}\n`);
   process.stdout.write(`recall ${formatRate(body.recall)}\n`);
@@ -336,12 +342,17 @@ function countToolCalls(value) {
   return count;
 }
 
-// Used by timeout.js to stop a run once the load decision is visible.
-function earlyStopReason(events, skill, maxTools) {
-  const state = { loaded: false, sawResult: false, anyInstall: true };
+// Stop when the same load the scorer would count is visible, or after maxTools
+// started tool calls. anyInstall and skillDir must match the skill-loaded
+// check for this arm, so a read of a different installation does not stop a
+// with-skill run that would score as not loaded.
+function earlyStopReason(events, skill, maxTools, options = {}) {
+  const anyInstall = options.anyInstall === undefined ? true : options.anyInstall === true;
+  const skillDir = typeof options.skillDir === "string" ? options.skillDir : "";
+  const state = { loaded: false, sawResult: false, anyInstall };
   let tools = 0;
   for (const event of events) {
-    scan(event, skill, "", state);
+    scan(event, skill, skillDir, state);
     tools += countToolCalls(event);
   }
   if (state.loaded) return "skill_loaded";

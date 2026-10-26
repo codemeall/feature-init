@@ -23,6 +23,8 @@ const deadline = setTimeout(() => stop("SIGTERM", 124), seconds * 1000);
 // the partial trace still reads as finished. Status 0 means stopped early.
 const watchTrace = process.env.HARNESS_WATCH_TRACE || "";
 const watchSkill = process.env.HARNESS_WATCH_SKILL || "feature-docs";
+const watchSkillDir = process.env.HARNESS_WATCH_SKILL_DIR || "";
+const watchAnyInstall = process.env.HARNESS_WATCH_ANY_INSTALL !== "0";
 const maxTools = Number(process.env.HARNESS_STOP_AFTER_TOOLS || "0");
 let watcher = null;
 if (watchTrace) {
@@ -37,7 +39,10 @@ if (watchTrace) {
       if (line.trim() === "") continue;
       try { events.push(JSON.parse(line)); } catch { /* ignore a malformed line */ }
     }
-    const reason = earlyStopReason(events, watchSkill, maxTools);
+    const reason = earlyStopReason(events, watchSkill, maxTools, {
+      skillDir: watchSkillDir,
+      anyInstall: watchAnyInstall,
+    });
     if (reason) {
       stopNote = { file: watchTrace, line: JSON.stringify({ type: "harness_stop", reason }) };
       stop("SIGTERM", 0);

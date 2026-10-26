@@ -249,8 +249,10 @@ process.stdout.write(String(trigger.length + miss.length));
 
 # Runs one arm. Prints "ok" or "skip:<reason>". Never aborts the eval.
 run_arm() {
-  local cwd="$1" trace="$2" prompt="$3" rc=0
-  HARNESS_WATCH_TRACE="$trace" HARNESS_WATCH_SKILL=feature-docs HARNESS_STOP_AFTER_TOOLS="$STOP_AFTER_TOOLS" \
+  local cwd="$1" trace="$2" prompt="$3" any_install="${4:-0}" skill_dir="${5:-}" rc=0
+  HARNESS_WATCH_TRACE="$trace" HARNESS_WATCH_SKILL=feature-docs \
+    HARNESS_WATCH_SKILL_DIR="$skill_dir" HARNESS_WATCH_ANY_INSTALL="$any_install" \
+    HARNESS_STOP_AFTER_TOOLS="$STOP_AFTER_TOOLS" \
     run_with_timeout "$EVAL_TIMEOUT" bash "$RUNNER_PATH" run --cwd "$cwd" --trace "$trace" --prompt "$prompt" >&2 || rc=$?
   if [[ "$rc" -eq 124 ]]; then printf 'skip:timeout after %ss\n' "$EVAL_TIMEOUT"; return 0; fi
   if [[ "$rc" -ne 0 ]]; then printf 'skip:runner exit %s\n' "$rc"; return 0; fi
@@ -283,10 +285,10 @@ for row in "${PROMPTS[@]}"; do
   [[ -f "$skill_dir/SKILL.md" ]] || fail_run "install did not create $skill_dir/SKILL.md"
 
   reason=""
-  status_with="$(run_arm "$with_dir" "$with_trace" "$prompt")"
+  status_with="$(run_arm "$with_dir" "$with_trace" "$prompt" 0 "$skill_dir")"
   [[ "$status_with" == ok ]] || reason="with-skill ${status_with#skip:}"
   if [[ -z "$reason" ]]; then
-    status_without="$(run_arm "$without_dir" "$without_trace" "$prompt")"
+    status_without="$(run_arm "$without_dir" "$without_trace" "$prompt" 1 "$skill_dir")"
     [[ "$status_without" == ok ]] || reason="without-skill ${status_without#skip:}"
   fi
   loaded_with=0
@@ -329,7 +331,7 @@ done
 rc=0
 node "$TRACE_JS" report --observations "$OBS" --status complete --runner "$RUNNER_NAME" \
   --model "$MODEL" --min-scored "$MIN_SCORED" --max-prompts "$MAX_PROMPTS" \
-  --catalog-size "$CATALOG_SIZE" --out "$OUT" || rc=$?
+  --catalog-size "$CATALOG_SIZE" --stop-after-tools "$STOP_AFTER_TOOLS" --out "$OUT" || rc=$?
 if [[ "$rc" -eq 2 ]]; then
   echo "The without-skill run loaded feature-docs. Precision and recall were not computed." >&2
   echo "Wrote $OUT/results.json" >&2
