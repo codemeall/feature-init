@@ -524,7 +524,7 @@ test("cleanup refuses a marker that escapes through .. and a symlink parent", (t
     fs.rmSync(lexical, { recursive: true, force: true });
   });
   fs.writeFileSync(marker, `${link}/../${path.basename(lexical)}\n`);
-  const result = spawnSync(process.execPath, [path.join(harness, "timeout.js"), "5", "/bin/true", "--trace", trace], {
+  const result = spawnSync(process.execPath, [path.join(harness, "timeout.js"), "5", process.execPath, "-e", "process.exit(0)", "--trace", trace], {
     encoding: "utf8",
   });
   assert.equal(result.status, 0, result.stderr);
@@ -621,12 +621,16 @@ setInterval(write, 50);
     const result = spawnSync("/bin/bash", ["-c", 'source "$1"; run_with_timeout 2 bash "$2" run --cwd "$3" --trace "$4" --prompt test',
       "test", path.join(harness, "lib.sh"), path.join(harness, "runners", `${runner}.sh`), dir, path.join(dir, "trace.jsonl")], {
       encoding: "utf8", timeout: 10000,
-      env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+      // A trailing slash is what GitHub macOS runners set. mktemp then emits
+      // a doubled slash unless the runner canonicalizes the path first.
+      env: { ...process.env, TMPDIR: `${os.tmpdir()}${path.sep}`, PATH: `${bin}${path.delimiter}${process.env.PATH}`,
         CLEANUP_RECORD: record, ANTHROPIC_API_KEY: "fixture-only", CURSOR_API_KEY: "fixture-only" },
     });
     assert.equal(result.status, 124, result.stderr);
     assert.equal(fs.existsSync(record), true, "stub CLI did not start");
     recorded = fs.readFileSync(record, "utf8");
+    assert.equal(recorded.includes("//"), false, `temp path was not canonical: ${recorded}`);
+    assert.equal(recorded, path.resolve(recorded), recorded);
     assert.equal(fs.existsSync(recorded), false, `temporary home survived: ${recorded}`);
     assert.equal(fs.existsSync(path.join(recorded, ".cursor/plugins/cache/keep.txt")), false);
     assert.equal(fs.existsSync(path.join(dir, "trace.jsonl.cleanup")), false, "cleanup marker survived the kill");

@@ -68,6 +68,7 @@ run_cmd() (
   }
   local work env_file rc=0 cleanup_file
   work="$(mktemp -d "${TMPDIR:-/tmp}/harness-claude.XXXXXX")"
+  work="$(canonical_path "$work")"
   cleanup_file="$trace.cleanup"
   # EXIT removes the work dir. The marker stays so the supervisor can remove
   # it again after a kill, once the agent can no longer recreate it.

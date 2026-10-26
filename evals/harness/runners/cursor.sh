@@ -71,6 +71,7 @@ run_cmd() (
   # with mode 0600 and removed with the HOME when the run ends.
   local home cleanup_file
   home="$(mktemp -d "${TMPDIR:-/tmp}/harness-cursor-home.XXXXXX")"
+  home="$(canonical_path "$home")"
   cleanup_file="$trace.cleanup"
   # EXIT removes the HOME. The marker stays so the supervisor can remove the
   # directory again after a kill, once the agent can no longer recreate it.
