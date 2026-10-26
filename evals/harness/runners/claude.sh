@@ -80,8 +80,12 @@ run_cmd() (
     env_args+=("$line")
   done < "$env_file"
   # stdout is the JSONL trace. stderr is kept beside it for debugging.
+  local -a model_args=()
+  if [[ -n "${HARNESS_MODEL:-}" ]]; then
+    model_args=(--model "$HARNESS_MODEL")
+  fi
   cd "$cwd" || exit 1
-  env "${env_args[@]}" claude -p "$prompt" \
+  env "${env_args[@]}" claude -p "$prompt" ${model_args[@]+"${model_args[@]}"} \
     --output-format stream-json \
     --verbose \
     --permission-mode dontAsk \
