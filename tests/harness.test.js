@@ -284,6 +284,18 @@ function runHarness(dir, env, args, timeout = 60000) {
     { cwd: dir, encoding: "utf8", timeout, env });
 }
 
+function reportEval(t, rows, args = []) {
+  const dir = workspace(t);
+  const observations = path.join(dir, "observations.json");
+  fs.writeFileSync(observations, JSON.stringify(rows));
+  const result = spawnSync(process.execPath, [path.join(harness, "trace.js"), "report",
+    "--observations", observations, "--status", "complete", "--runner", "fixture", "--out", dir, ...args],
+    { encoding: "utf8" });
+  const body = JSON.parse(fs.readFileSync(path.join(dir, "results.json"), "utf8"));
+  const summary = fs.readFileSync(path.join(dir, "summary.md"), "utf8");
+  return { result, body, summary };
+}
+
 test("Cursor runs use an isolated HOME, an empty workspace, only the auth file, and the chosen model", (t) => {
   const { dir, realHome, env } = fakeCursorEnv(t);
   const result = runHarness(dir, env, ["--model", "fixture-model", "--max-prompts", "2"]);
@@ -311,8 +323,15 @@ test("Cursor runs use an isolated HOME, an empty workspace, only the auth file, 
   assert.equal(report.prompts, 2);
   assert.equal(report.scored, 2);
   assert.equal(report.skipped, 0);
+  assert.equal(report.status, "smoke");
+  assert.equal(report.precision, null);
+  assert.equal(report.recall, null);
+  const summary = fs.readFileSync(path.join(dir, "out/summary.md"), "utf8");
+  assert.match(summary, /Model: fixture-model/);
+  assert.match(summary, /Smoke:/);
+  assert.doesNotMatch(summary, /^Precision: [0-9]/m);
+  assert.doesNotMatch(summary, /^Recall: [0-9]/m);
   assert.deepEqual(report.results.map((r) => r.expected), ["trigger", "near_miss"]);
-  assert.match(fs.readFileSync(path.join(dir, "out/summary.md"), "utf8"), /Model: fixture-model/);
 });
 
 test("HARNESS_MODEL is the model fallback", (t) => {
@@ -353,4 +372,62 @@ test("early stop ends a run at the first skill load, and after N tool calls with
     assert.equal(trigger.early_stop_with, loaded ? "skill_loaded" : "tool_limit");
     assert.equal(result.status, 0, result.stderr);
   }
+});
+
+test("max-prompts truncation is a smoke run and does not claim rates", (t) => {
+  const rows = [
+    { expected: "trigger", loaded_with_skill: true, loaded_without_skill: false, prompt: "trigger prompt" },
+    { expected: "near_miss", loaded_with_skill: false, loaded_without_skill: false, prompt: "near miss prompt" },
+  ];
+  const { result, body, summary } = reportEval(t, rows, ["--max-prompts", "2", "--catalog-size", "24", "--min-scored", "0.8"]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(body.status, "smoke");
+  assert.equal(body.precision, null);
+  assert.equal(body.recall, null);
+  assert.match(summary, /Smoke:/);
+  assert.doesNotMatch(summary, /^Precision: [0-9]/m);
+  assert.doesNotMatch(summary, /^Recall: [0-9]/m);
+});
+
+test("a scored set with only one class is incomplete", (t) => {
+  const rows = [
+    { expected: "trigger", loaded_with_skill: true, loaded_without_skill: false, prompt: "one" },
+    { expected: "trigger", loaded_with_skill: false, loaded_without_skill: false, prompt: "two" },
+  ];
+  const { result, body } = reportEval(t, rows, ["--min-scored", "0"]);
+  assert.equal(body.status, "incomplete");
+  assert.equal(body.precision, null);
+  assert.equal(body.recall, null);
+  assert.equal(result.status, 3, result.stderr);
+});
+
+test("min-scored 0 with zero scored rows is incomplete, not partial", (t) => {
+  const rows = [
+    { expected: "trigger", skipped: true, skip_reason: "timeout", prompt: "one" },
+    { expected: "near_miss", skipped: true, skip_reason: "timeout", prompt: "two" },
+  ];
+  const { result, body, summary } = reportEval(t, rows, ["--min-scored", "0"]);
+  assert.equal(body.status, "incomplete");
+  assert.notEqual(body.status, "partial");
+  assert.equal(body.precision, null);
+  assert.equal(body.recall, null);
+  assert.equal(body.scored, 0);
+  assert.equal(result.status, 3, result.stderr);
+  assert.match(summary, /Precision: not computed/);
+});
+
+test("a full run that clears the floor and both classes still reports rates", (t) => {
+  const rows = [
+    { expected: "trigger", loaded_with_skill: true, loaded_without_skill: false, prompt: "one" },
+    { expected: "trigger", skipped: true, skip_reason: "timeout", prompt: "two" },
+    { expected: "near_miss", loaded_with_skill: true, loaded_without_skill: false, prompt: "three" },
+    { expected: "near_miss", loaded_with_skill: false, loaded_without_skill: false, prompt: "four" },
+  ];
+  const { result, body, summary } = reportEval(t, rows, ["--min-scored", "0.5", "--max-prompts", "0", "--catalog-size", "4"]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(body.status, "partial");
+  assert.equal(body.precision, 0.5);
+  assert.equal(body.recall, 1);
+  assert.match(summary, /Precision: 0\.5000/);
+  assert.match(summary, /Recall: 1\.0000/);
 });

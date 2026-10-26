@@ -189,6 +189,16 @@ function formatRate(value) {
   return value.toFixed(4);
 }
 
+function hasBothClasses(rows) {
+  let trigger = false;
+  let nearMiss = false;
+  for (const row of rows) {
+    if (row.expected === "trigger") trigger = true;
+    else if (row.expected === "near_miss") nearMiss = true;
+  }
+  return trigger && nearMiss;
+}
+
 function report(argv) {
   const observationsFile = flag(argv, "--observations");
   const requested = flag(argv, "--status");
@@ -197,15 +207,36 @@ function report(argv) {
   const error = optionalFlag(argv, "--error");
   const model = optionalFlag(argv, "--model") || null;
   const minScored = Number(optionalFlag(argv, "--min-scored") || "0.8");
+  const maxPrompts = Number(optionalFlag(argv, "--max-prompts") || "0");
+  const catalogSize = Number(optionalFlag(argv, "--catalog-size") || "0");
   const rows = readObservations(observationsFile).map((row) => ({ ...row, outcome: row.skipped ? "skipped" : outcome(row) }));
   const scoredRows = rows.filter((row) => !row.skipped);
   const skippedCount = rows.length - scoredRows.length;
-  const enough = rows.length > 0 && scoredRows.length / rows.length >= minScored;
+  // A cap above the catalog is not a truncation. Omitting the catalog size
+  // still treats a positive --max-prompts as a truncated smoke set.
+  const truncated = maxPrompts > 0 && (catalogSize <= 0 || rows.length < catalogSize);
+  // Zero scored rows stay incomplete even when --min-scored is 0.
+  const enough = rows.length > 0 && scoredRows.length > 0 && scoredRows.length / rows.length >= minScored;
+  const bothClasses = hasBothClasses(scoredRows);
+  let preview = null;
+  if (scoredRows.length > 0 && enough) preview = scoreRows(scoredRows);
   let status = requested;
-  if (requested === "complete" && !enough) status = "incomplete";
+  if (requested === "complete" && preview && preview.contaminated) status = "contaminated";
+  else if (requested === "complete" && !enough) status = "incomplete";
+  else if (requested === "complete" && !bothClasses) status = "incomplete";
+  else if (requested === "complete" && truncated) status = "smoke";
   else if (requested === "complete" && skippedCount > 0) status = "partial";
-  const scored = status === "complete" || status === "partial" ? scoreRows(scoredRows) : null;
-  if (scored && scored.contaminated) status = "contaminated";
+  const claimRates = status === "complete" || status === "partial";
+  const metrics = claimRates ? preview : {
+    contaminated: status === "contaminated",
+    contaminated_count: preview ? preview.contaminated_count : scoredRows.filter((row) => row.loaded_without_skill).length,
+    true_positive: preview ? preview.true_positive : null,
+    false_negative: preview ? preview.false_negative : null,
+    false_positive: preview ? preview.false_positive : null,
+    true_negative: preview ? preview.true_negative : null,
+    precision: null,
+    recall: null,
+  };
   const usage = { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, runs_with_usage: 0, runs: 0 };
   for (const row of rows) {
     for (const u of [row.usage_with, row.usage_without]) {
@@ -217,16 +248,6 @@ function report(argv) {
       usage.cache_read_tokens += Number(u.cacheReadTokens ?? u.cache_read_input_tokens ?? 0);
     }
   }
-  const metrics = status === "complete" || status === "partial" ? scored : {
-    contaminated: status === "contaminated",
-    contaminated_count: scored ? scored.contaminated_count : scoredRows.filter((row) => row.loaded_without_skill).length,
-    true_positive: scored ? scored.true_positive : null,
-    false_negative: scored ? scored.false_negative : null,
-    false_positive: scored ? scored.false_positive : null,
-    true_negative: scored ? scored.true_negative : null,
-    precision: null,
-    recall: null,
-  };
   const body = {
     status,
     runner,
@@ -260,10 +281,16 @@ function report(argv) {
     `Scored: ${scoredRows.length} of ${rows.length} prompts. Skipped: ${skippedCount}.`,
     `Usage: ${usage.input_tokens} input, ${usage.output_tokens} output, ${usage.cache_read_tokens} cache read tokens from ${usage.runs_with_usage} of ${usage.runs} runs. Early stopped runs report no usage. USD cost is not in the trace.`,
     "Skipped prompts (timeout, runner failure, unreadable trace) are left out of precision and recall.",
-    `Status incomplete means fewer than ${Math.round(minScored * 100)}% of prompts were scored, so no rates are claimed. Partial means some were skipped.`,
+    `Status incomplete means fewer than ${Math.round(minScored * 100)}% of prompts were scored, a class has no scored row, or nothing scored, so no rates are claimed. Partial means some were skipped and both classes scored.`,
     "",
-    `Precision: ${formatRate(body.precision)}`,
-    `Recall: ${formatRate(body.recall)}`,
+  ];
+  if (status === "smoke") {
+    lines.push("Smoke: --max-prompts truncated the prompt set. Precision and recall are not claimed.");
+  } else {
+    lines.push(`Precision: ${formatRate(body.precision)}`);
+    lines.push(`Recall: ${formatRate(body.recall)}`);
+  }
+  lines.push(
     "",
     "Precision is true positives divided by every prompt that loaded the skill only in the with-skill run.",
     "Recall is true positives divided by the should-trigger prompts.",
@@ -272,7 +299,7 @@ function report(argv) {
     "",
     "| Expected | With skill | Without skill | Outcome | Note | Prompt |",
     "| --- | --- | --- | --- | --- | --- |",
-  ];
+  );
   for (const row of rows) {
     const prompt = String(row.prompt).replace(/\|/g, "/");
     lines.push(

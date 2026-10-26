@@ -40,9 +40,11 @@ read of the installed SKILL.md. Reply text does not count.
                    end a run at the first skill load, or after N started tool calls
                    without one (env HARNESS_STOP_AFTER_TOOLS, default 4, 0 disables)
   --max-prompts N  run only N prompts, alternating should-trigger and near-miss
-                   (env HARNESS_MAX_PROMPTS, default 0 means all)
+                   (env HARNESS_MAX_PROMPTS, default 0 means all). A truncation
+                   is a smoke run and does not claim precision or recall.
   --min-scored F   fraction of prompts that must score, or the run is incomplete
-                   and no rates are claimed (env HARNESS_MIN_SCORED, default 0.8)
+                   and no rates are claimed (env HARNESS_MIN_SCORED, default 0.8).
+                   0 still needs at least one scored row, and both classes.
   --help
 
 Each run gets a fresh empty workspace outside the repository and, for Cursor,
@@ -237,6 +239,14 @@ for (const row of rows) console.log(JSON.stringify(row));
 [[ "${#PROMPTS[@]}" -gt 0 && "${PROMPTS[0]}" != "__error__" && "${PROMPTS[${#PROMPTS[@]}-1]}" != "__error__" ]] \
   || fail_run "triggers.json needs should_trigger and should_not_trigger prompts"
 
+CATALOG_SIZE="$(node -e '
+const fs = require("node:fs");
+const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const trigger = Array.isArray(data.should_trigger) ? data.should_trigger : [];
+const miss = Array.isArray(data.should_not_trigger) ? data.should_not_trigger : [];
+process.stdout.write(String(trigger.length + miss.length));
+' "$TRIGGERS")"
+
 # Runs one arm. Prints "ok" or "skip:<reason>". Never aborts the eval.
 run_arm() {
   local cwd="$1" trace="$2" prompt="$3" rc=0
@@ -318,7 +328,8 @@ done
 
 rc=0
 node "$TRACE_JS" report --observations "$OBS" --status complete --runner "$RUNNER_NAME" \
-  --model "$MODEL" --min-scored "$MIN_SCORED" --out "$OUT" || rc=$?
+  --model "$MODEL" --min-scored "$MIN_SCORED" --max-prompts "$MAX_PROMPTS" \
+  --catalog-size "$CATALOG_SIZE" --out "$OUT" || rc=$?
 if [[ "$rc" -eq 2 ]]; then
   echo "The without-skill run loaded feature-docs. Precision and recall were not computed." >&2
   echo "Wrote $OUT/results.json" >&2
@@ -326,7 +337,7 @@ if [[ "$rc" -eq 2 ]]; then
   exit 2
 fi
 if [[ "$rc" -eq 3 ]]; then
-  echo "Too few prompts were scored. The run is incomplete and no rates are claimed." >&2
+  echo "The run is incomplete and no rates are claimed." >&2
   echo "Wrote $OUT/results.json" >&2
   echo "Wrote $OUT/summary.md" >&2
   exit 1

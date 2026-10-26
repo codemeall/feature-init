@@ -33,14 +33,15 @@ The Cursor runner prefers `cursor-agent`. A generic `agent` command is used only
 - `--model NAME` (env `HARNESS_MODEL`) is passed to the CLI as `--model`. Both runners support it. The model is written to `results.json` and `summary.md`.
 - `--timeout SECS` (env `EVAL_TIMEOUT`). A timeout, a runner failure, or an unreadable trace marks that prompt as skipped with a reason. The run continues.
 - `--stop-after-tools N` (env `HARNESS_STOP_AFTER_TOOLS`, default 4, 0 disables). See Early stop.
-- `--max-prompts N` (env `HARNESS_MAX_PROMPTS`) runs only N prompts, alternating should-trigger and near-miss, for a cheap smoke run.
-- `--min-scored F` (env `HARNESS_MIN_SCORED`, default 0.8). If fewer than this fraction of prompts were scored, the status is `incomplete`, precision and recall stay unset, and the script exits 1.
+- `--max-prompts N` (env `HARNESS_MAX_PROMPTS`) runs only N prompts, alternating should-trigger and near-miss, for a cheap smoke run. When that cap truncates the catalog, the status is `smoke` and precision and recall are not claimed.
+- `--min-scored F` (env `HARNESS_MIN_SCORED`, default 0.8). If fewer than this fraction of prompts were scored, the status is `incomplete`, precision and recall stay unset, and the script exits 1. `0` still requires at least one scored row.
 
 ## Status
 
-- `complete`: every prompt scored.
-- `partial`: some prompts were skipped, but at least `--min-scored` of them scored. Rates use scored prompts only.
-- `incomplete`: too few prompts scored, or the run stopped on an error. No rates.
+- `complete`: every prompt scored, with at least one scored row in each class (should-trigger and should-not-trigger).
+- `partial`: some prompts were skipped, at least `--min-scored` of them scored, and both classes have a scored row. Rates use scored prompts only.
+- `smoke`: `--max-prompts` truncated the prompt set, and the scored rows would otherwise have been eligible for rates. No rates are claimed.
+- `incomplete`: too few prompts scored, one class has no scored row, nothing scored, or the run stopped on an error. No rates.
 - `contaminated`: the skill loaded in a without-skill run. No rates.
 
 The summary shows scored and skipped counts, each skip reason, and token usage summed from the CLI `result` events. The CLIs do not report USD cost in the trace, so cost has to be read from the provider dashboard.
