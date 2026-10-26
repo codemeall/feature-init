@@ -6,6 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { test } = require("node:test");
+const { earlyStopReason } = require("../evals/harness/trace.js");
 
 const root = path.resolve(__dirname, "..");
 const harness = path.join(root, "evals/harness");
@@ -219,3 +220,272 @@ console.log(JSON.stringify({type:"result",subtype:"success"}));
   assert.equal(fs.readdirSync(path.join(dir, "relative results/traces")).filter((f) => f.endsWith(".jsonl")).length, 48);
 });
 }
+
+// Fake Cursor CLI used by the isolation, model, skip, and early stop tests.
+// It never touches the network. FAKE_MODE picks the behavior.
+const FAKE_CURSOR = `#!/usr/bin/env node
+const fs = require("node:fs"), path = require("node:path");
+const args = process.argv.slice(2);
+if (args[0] === "status") { console.log("Logged in"); process.exit(0); }
+const ws = args[args.indexOf("--workspace") + 1];
+const home = process.env.HOME;
+const auth = path.join(home, ".config/cursor/auth.json");
+const probe = {
+  home, cwd: process.cwd(), workspace: ws,
+  model: args.includes("--model") ? args[args.indexOf("--model") + 1] : null,
+  plugins: fs.existsSync(path.join(home, ".cursor/plugins")),
+  auth_mode: fs.existsSync(auth) ? (fs.statSync(auth).mode & 0o777).toString(8) : null,
+  auth_entries: fs.existsSync(path.join(home, ".config/cursor")) ? fs.readdirSync(path.join(home, ".config/cursor")) : [],
+  home_entries: fs.readdirSync(home).sort(),
+  cwd_entries: fs.readdirSync(process.cwd()).sort(),
+};
+if (process.env.PROBE_LOG) fs.appendFileSync(process.env.PROBE_LOG, JSON.stringify(probe) + "\\n");
+const skill = path.join(ws, ".cursor/skills/feature-docs/SKILL.md");
+const say = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
+const mode = process.env.FAKE_MODE || "normal";
+const counter = process.env.FAKE_COUNTER;
+let n = 0;
+if (counter) { n = fs.existsSync(counter) ? Number(fs.readFileSync(counter, "utf8")) : 0; fs.writeFileSync(counter, String(n + 1)); }
+if (mode === "hang-first" && n === 0) setInterval(() => {}, 1000);
+else if (mode === "load-then-hang") {
+  if (fs.existsSync(skill)) say({type:"tool_call",subtype:"started",tool_call:{readToolCall:{args:{path:skill}}}});
+  else for (let i = 0; i < 10; i++) say({type:"tool_call",subtype:"started",tool_call:{lsToolCall:{args:{path:ws}}}});
+  setInterval(() => {}, 1000);
+} else if (mode === "busy-then-hang") {
+  for (let i = 0; i < 10; i++) say({type:"tool_call",subtype:"started",tool_call:{lsToolCall:{args:{path:ws}}}});
+  setInterval(() => {}, 1000);
+} else if (mode === "foreign-then-tools") {
+  say({type:"tool_call",subtype:"started",tool_call:{readToolCall:{args:{path:"/other/project/.cursor/skills/feature-docs/SKILL.md"}}}});
+  for (let i = 0; i < 6; i++) say({type:"tool_call",subtype:"started",tool_call:{lsToolCall:{args:{path:ws}}}});
+  setInterval(() => {}, 1000);
+} else {
+  if (fs.existsSync(skill)) say({type:"tool_call",subtype:"started",tool_call:{readToolCall:{args:{path:skill}}}});
+  say({type:"result",subtype:"success",usage:{inputTokens:10,outputTokens:2}});
+}
+`;
+
+function fakeCursorEnv(t, extra = {}) {
+  const dir = workspace(t);
+  const bin = path.join(dir, "bin");
+  const realHome = path.join(dir, "real-home");
+  fs.mkdirSync(bin);
+  fs.mkdirSync(path.join(realHome, ".cursor/plugins/evil"), { recursive: true });
+  fs.mkdirSync(path.join(realHome, ".cursor/skills-cursor"), { recursive: true });
+  fs.mkdirSync(path.join(realHome, ".config/cursor"), { recursive: true });
+  fs.writeFileSync(path.join(realHome, ".config/cursor/auth.json"), '{"accessToken":"fixture"}', { mode: 0o600 });
+  fs.writeFileSync(path.join(realHome, ".config/cursor/other.json"), "{}");
+  fs.writeFileSync(path.join(bin, "cursor-agent"), FAKE_CURSOR, { mode: 0o755 });
+  const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, HOME: realHome,
+    PROBE_LOG: path.join(dir, "probe.jsonl"), FAKE_COUNTER: path.join(dir, "counter") };
+  delete env.CURSOR_API_KEY;
+  delete env.XDG_CONFIG_HOME;
+  delete env.HARNESS_MODEL;
+  Object.assign(env, extra);
+  return { dir, realHome, env };
+}
+
+function assertHomesRemoved(probeLog) {
+  const text = fs.readFileSync(probeLog, "utf8").trim();
+  assert.notEqual(text, "", "probe log was empty");
+  for (const line of text.split("\n")) {
+    const probe = JSON.parse(line);
+    assert.equal(fs.existsSync(probe.home), false, `temporary HOME survived: ${probe.home}`);
+    assert.equal(fs.existsSync(path.join(probe.home, ".config/cursor/auth.json")), false, `auth copy survived: ${probe.home}`);
+  }
+}
+
+function runHarness(dir, env, args, timeout = 60000) {
+  return spawnSync("/bin/bash", [path.join(harness, "run-harness-eval.sh"), "--runner", "cursor", "--out", path.join(dir, "out"), ...args],
+    { cwd: dir, encoding: "utf8", timeout, env });
+}
+
+function reportEval(t, rows, args = []) {
+  const dir = workspace(t);
+  const observations = path.join(dir, "observations.json");
+  fs.writeFileSync(observations, JSON.stringify(rows));
+  const result = spawnSync(process.execPath, [path.join(harness, "trace.js"), "report",
+    "--observations", observations, "--status", "complete", "--runner", "fixture", "--out", dir, ...args],
+    { encoding: "utf8" });
+  const body = JSON.parse(fs.readFileSync(path.join(dir, "results.json"), "utf8"));
+  const summary = fs.readFileSync(path.join(dir, "summary.md"), "utf8");
+  return { result, body, summary };
+}
+
+test("Cursor runs use an isolated HOME, an empty workspace, only the auth file, and the chosen model", (t) => {
+  const { dir, realHome, env } = fakeCursorEnv(t);
+  const result = runHarness(dir, env, ["--model", "fixture-model", "--max-prompts", "2"]);
+  assert.equal(result.status, 0, result.stderr);
+  const probes = fs.readFileSync(env.PROBE_LOG, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(probes.length, 4);
+  const workspaces = new Set();
+  for (const p of probes) {
+    assert.notEqual(p.home, realHome);
+    assert.equal(p.plugins, false);
+    assert.equal(p.model, "fixture-model");
+    assert.equal(p.auth_mode, "600");
+    assert.deepEqual(p.auth_entries, ["auth.json"]);
+    assert.ok(!p.cwd.startsWith(root) && !p.workspace.startsWith(root), p.cwd);
+    assert.ok(!p.workspace.startsWith(dir), "workspace must not sit beside the eval output");
+    for (const name of ["triggers.json", "prompts.jsonl", "run-harness-eval.sh", "trace.js"]) {
+      assert.ok(!p.cwd_entries.includes(name), name);
+    }
+    assert.ok(!fs.existsSync(p.home), "temporary HOME and auth copy were not removed");
+    workspaces.add(p.workspace);
+  }
+  assert.equal(workspaces.size, 4, "each run needs a fresh workspace");
+  const report = JSON.parse(fs.readFileSync(path.join(dir, "out/results.json"), "utf8"));
+  assert.equal(report.model, "fixture-model");
+  assert.equal(report.prompts, 2);
+  assert.equal(report.scored, 2);
+  assert.equal(report.skipped, 0);
+  assert.equal(report.status, "smoke");
+  assert.equal(report.precision, null);
+  assert.equal(report.recall, null);
+  const summary = fs.readFileSync(path.join(dir, "out/summary.md"), "utf8");
+  assert.match(summary, /Model: fixture-model/);
+  assert.match(summary, /Smoke:/);
+  assert.doesNotMatch(summary, /^Precision: [0-9]/m);
+  assert.doesNotMatch(summary, /^Recall: [0-9]/m);
+  assert.deepEqual(report.results.map((r) => r.expected), ["trigger", "near_miss"]);
+});
+
+test("HARNESS_MODEL is the model fallback", (t) => {
+  const { dir, env } = fakeCursorEnv(t, { HARNESS_MODEL: "env-model" });
+  const result = runHarness(dir, env, ["--max-prompts", "2"]);
+  assert.equal(result.status, 0, result.stderr);
+  const p = JSON.parse(fs.readFileSync(env.PROBE_LOG, "utf8").split("\n")[0]);
+  assert.equal(p.model, "env-model");
+});
+
+test("a timeout is a skip with a reason, not an aborted run, and too few scored prompts is incomplete", (t) => {
+  const { dir, env } = fakeCursorEnv(t, { FAKE_MODE: "hang-first" });
+  const result = runHarness(dir, env, ["--timeout", "2", "--max-prompts", "2"]);
+  const report = JSON.parse(fs.readFileSync(path.join(dir, "out/results.json"), "utf8"));
+  assert.equal(report.prompts, 2);
+  assert.equal(report.scored, 1);
+  assert.equal(report.skipped, 1);
+  assert.equal(report.status, "incomplete");
+  assert.equal(report.precision, null);
+  assert.equal(report.recall, null);
+  const skipped = report.results.find((r) => r.skipped);
+  assert.match(skipped.skip_reason, /timeout/);
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(fs.readFileSync(path.join(dir, "out/summary.md"), "utf8"), /Scored: 1 of 2/);
+  assertHomesRemoved(env.PROBE_LOG);
+});
+
+test("early stop ends a run at the first skill load, and after N tool calls without one", (t) => {
+  for (const [mode, loaded] of [["load-then-hang", true], ["busy-then-hang", false]]) {
+    const { dir, env } = fakeCursorEnv(t, { FAKE_MODE: mode });
+    const started = Date.now();
+    const result = runHarness(dir, env, ["--timeout", "60", "--max-prompts", "2", "--stop-after-tools", "4"]);
+    assert.ok(Date.now() - started < 30000, "early stop did not end the run");
+    const report = JSON.parse(fs.readFileSync(path.join(dir, "out/results.json"), "utf8"));
+    assert.equal(report.skipped, 0, JSON.stringify(report.results));
+    assert.equal(report.stop_after_tools, 4);
+    assert.match(fs.readFileSync(path.join(dir, "out/summary.md"), "utf8"), /Stop after tools: 4/);
+    const trigger = report.results.find((r) => r.expected === "trigger");
+    assert.equal(trigger.loaded_with_skill, loaded, mode);
+    assert.equal(trigger.loaded_without_skill, false);
+    assert.equal(trigger.early_stop_with, loaded ? "skill_loaded" : "tool_limit");
+    assert.equal(result.status, 0, result.stderr);
+    assertHomesRemoved(env.PROBE_LOG);
+  }
+});
+
+test("max-prompts truncation is a smoke run and does not claim rates", (t) => {
+  const rows = [
+    { expected: "trigger", loaded_with_skill: true, loaded_without_skill: false, prompt: "trigger prompt" },
+    { expected: "near_miss", loaded_with_skill: false, loaded_without_skill: false, prompt: "near miss prompt" },
+  ];
+  const { result, body, summary } = reportEval(t, rows, ["--max-prompts", "2", "--catalog-size", "24", "--min-scored", "0.8"]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(body.status, "smoke");
+  assert.equal(body.precision, null);
+  assert.equal(body.recall, null);
+  assert.match(summary, /Smoke:/);
+  assert.doesNotMatch(summary, /^Precision: [0-9]/m);
+  assert.doesNotMatch(summary, /^Recall: [0-9]/m);
+});
+
+test("a scored set with only one class is incomplete", (t) => {
+  const rows = [
+    { expected: "trigger", loaded_with_skill: true, loaded_without_skill: false, prompt: "one" },
+    { expected: "trigger", loaded_with_skill: false, loaded_without_skill: false, prompt: "two" },
+  ];
+  const { result, body } = reportEval(t, rows, ["--min-scored", "0"]);
+  assert.equal(body.status, "incomplete");
+  assert.equal(body.precision, null);
+  assert.equal(body.recall, null);
+  assert.equal(result.status, 3, result.stderr);
+});
+
+test("min-scored 0 with zero scored rows is incomplete, not partial", (t) => {
+  const rows = [
+    { expected: "trigger", skipped: true, skip_reason: "timeout", prompt: "one" },
+    { expected: "near_miss", skipped: true, skip_reason: "timeout", prompt: "two" },
+  ];
+  const { result, body, summary } = reportEval(t, rows, ["--min-scored", "0"]);
+  assert.equal(body.status, "incomplete");
+  assert.notEqual(body.status, "partial");
+  assert.equal(body.precision, null);
+  assert.equal(body.recall, null);
+  assert.equal(body.scored, 0);
+  assert.equal(result.status, 3, result.stderr);
+  assert.match(summary, /Precision: not computed/);
+});
+
+test("results record the stop-after-tools value that was used", (t) => {
+  const rows = [
+    { expected: "trigger", loaded_with_skill: true, loaded_without_skill: false, prompt: "one" },
+    { expected: "near_miss", loaded_with_skill: false, loaded_without_skill: false, prompt: "two" },
+  ];
+  const { result, body, summary } = reportEval(t, rows, ["--stop-after-tools", "4", "--min-scored", "0"]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(body.status, "complete");
+  assert.equal(body.stop_after_tools, 4);
+  assert.match(summary, /Stop after tools: 4/);
+});
+
+test("a read of a different installation does not end the with-skill run early", () => {
+  const selected = "/tmp/ws/.cursor/skills/feature-docs";
+  const events = [
+    { type: "tool_call", subtype: "started", tool_call: { readToolCall: { args: { path: "/other/project/.cursor/skills/feature-docs/SKILL.md" } } } },
+  ];
+  for (let i = 0; i < 4; i += 1) {
+    events.push({ type: "tool_call", subtype: "started", tool_call: { lsToolCall: { args: { path: "/tmp/ws" } } } });
+  }
+  assert.equal(earlyStopReason(events, "feature-docs", 4, { anyInstall: false, skillDir: selected }), "tool_limit");
+  assert.equal(earlyStopReason(events, "feature-docs", 4, { anyInstall: true, skillDir: selected }), "skill_loaded");
+  const selectedRead = [{ type: "tool_call", subtype: "started", tool_call: { readToolCall: { args: { path: `${selected}/SKILL.md` } } } }];
+  assert.equal(earlyStopReason(selectedRead, "feature-docs", 4, { anyInstall: false, skillDir: selected }), "skill_loaded");
+});
+
+test("harness early stop uses the same install the scorer uses", (t) => {
+  const { dir, env } = fakeCursorEnv(t, { FAKE_MODE: "foreign-then-tools" });
+  const result = runHarness(dir, env, ["--timeout", "60", "--max-prompts", "1", "--stop-after-tools", "4"]);
+  const report = JSON.parse(fs.readFileSync(path.join(dir, "out/results.json"), "utf8"));
+  const trigger = report.results.find((r) => r.expected === "trigger");
+  assert.equal(trigger.loaded_with_skill, false);
+  assert.equal(trigger.early_stop_with, "tool_limit");
+  assert.equal(trigger.loaded_without_skill, true);
+  assert.equal(trigger.early_stop_without, "skill_loaded");
+  assert.equal(report.stop_after_tools, 4);
+  assert.equal(result.status, 2, result.stderr);
+});
+
+test("a full run that clears the floor and both classes still reports rates", (t) => {
+  const rows = [
+    { expected: "trigger", loaded_with_skill: true, loaded_without_skill: false, prompt: "one" },
+    { expected: "trigger", skipped: true, skip_reason: "timeout", prompt: "two" },
+    { expected: "near_miss", loaded_with_skill: true, loaded_without_skill: false, prompt: "three" },
+    { expected: "near_miss", loaded_with_skill: false, loaded_without_skill: false, prompt: "four" },
+  ];
+  const { result, body, summary } = reportEval(t, rows, ["--min-scored", "0.5", "--max-prompts", "0", "--catalog-size", "4"]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(body.status, "partial");
+  assert.equal(body.precision, 0.5);
+  assert.equal(body.recall, 1);
+  assert.match(summary, /Precision: 0\.5000/);
+  assert.match(summary, /Recall: 1\.0000/);
+});

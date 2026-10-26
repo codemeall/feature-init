@@ -60,24 +60,31 @@ run_cmd() (
   }
   local bin rc=0
   bin="$(cursor_bin)" || { echo "cursor agent CLI is not on PATH" >&2; exit 3; }
-  local -a args=(-p --output-format stream-json --trust --force --workspace "$cwd" "$prompt")
-  if [[ -n "${CURSOR_API_KEY:-}" ]]; then
-    local home
-    home="$(mktemp -d "${TMPDIR:-/tmp}/feature-docs-cursor-home.XXXXXX")"
-    trap 'rm -rf "$home"' EXIT
-    trap 'exit 143' TERM
-    trap 'exit 130' INT
-    # A separate HOME hides skills already installed for the user.
-    # CURSOR_API_KEY stays in the environment and is not printed.
-    env HOME="$home" "$bin" "${args[@]}" < /dev/null >"$trace" 2>"$trace.stderr" &
-    wait "$!" || rc=$?
-    return "$rc"
+  local -a args=(-p --output-format stream-json --trust --force --workspace "$cwd")
+  if [[ -n "${HARNESS_MODEL:-}" ]]; then
+    args+=(--model "$HARNESS_MODEL")
+  fi
+  args+=("$prompt")
+  # Every run gets an empty HOME so skills, plugins, rules, and chats the user
+  # installed globally (~/.cursor/plugins, ~/.cursor/skills-cursor) are not
+  # visible. The only file carried over is the CLI login, auth.json, copied
+  # with mode 0600 and removed with the HOME when the run ends.
+  local home
+  home="$(mktemp -d "${TMPDIR:-/tmp}/feature-docs-cursor-home.XXXXXX")"
+  trap 'rm -rf "$home"' EXIT
+  trap 'exit 143' TERM
+  trap 'exit 130' INT
+  mkdir -p "$home/.config/cursor"
+  if [[ -z "${CURSOR_API_KEY:-}" ]]; then
+    local auth="${XDG_CONFIG_HOME:-$HOME/.config}/cursor/auth.json"
+    [[ -f "$auth" ]] || { echo "cursor login not found at $auth; set CURSOR_API_KEY or run cursor-agent login" >&2; exit 3; }
+    (umask 077 && cp "$auth" "$home/.config/cursor/auth.json")
+    chmod 600 "$home/.config/cursor/auth.json"
   fi
   # A foreground CLI would defer TERM and INT until it returned. wait is
   # interruptible, so these traps run even when the CLI ignores the signal.
-  trap 'exit 143' TERM
-  trap 'exit 130' INT
-  "$bin" "${args[@]}" < /dev/null >"$trace" 2>"$trace.stderr" &
+  # CURSOR_API_KEY, when set, stays in the environment and is not printed.
+  (cd "$cwd" && exec env -u XDG_CONFIG_HOME HOME="$home" TMPDIR="$home" "$bin" "${args[@]}") < /dev/null >"$trace" 2>"$trace.stderr" &
   wait "$!" || rc=$?
   return "$rc"
 )

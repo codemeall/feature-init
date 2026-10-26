@@ -21,7 +21,56 @@ The script does not invent a trace or a score. If the CLI or credentials are mis
 
 The Cursor runner prefers `cursor-agent`. A generic `agent` command is used only when its help identifies it as Cursor.
 
-`EVAL_TIMEOUT` is the per-prompt limit in seconds (default 180). This eval is not part of CI.
+`EVAL_TIMEOUT` (or `--timeout`) is the per-run limit in seconds (default 180). This eval is not part of CI.
+
+## Options
+
+```bash
+./evals/harness/run-harness-eval.sh --runner cursor --model grok-4.7-high \
+  --timeout 180 --stop-after-tools 4 --max-prompts 0 --min-scored 0.8
+```
+
+- `--model NAME` (env `HARNESS_MODEL`) is passed to the CLI as `--model`. Both runners support it. The model is written to `results.json` and `summary.md`.
+- `--timeout SECS` (env `EVAL_TIMEOUT`). A timeout, a runner failure, or an unreadable trace marks that prompt as skipped with a reason. The run continues.
+- `--stop-after-tools N` (env `HARNESS_STOP_AFTER_TOOLS`, default 4, 0 disables). See Early stop.
+- `--max-prompts N` (env `HARNESS_MAX_PROMPTS`) runs only N prompts, alternating should-trigger and near-miss, for a cheap smoke run. When that cap truncates the catalog, the status is `smoke` and precision and recall are not claimed.
+- `--min-scored F` (env `HARNESS_MIN_SCORED`, default 0.8). If fewer than this fraction of prompts were scored, the status is `incomplete`, precision and recall stay unset, and the script exits 1. `0` still requires at least one scored row.
+
+## Status
+
+- `complete`: every prompt scored, with at least one scored row in each class (should-trigger and should-not-trigger).
+- `partial`: some prompts were skipped, at least `--min-scored` of them scored, and both classes have a scored row. Rates use scored prompts only.
+- `smoke`: `--max-prompts` truncated the prompt set, and the scored rows would otherwise have been eligible for rates. No rates are claimed.
+- `incomplete`: too few prompts scored, one class has no scored row, nothing scored, or the run stopped on an error. No rates.
+- `contaminated`: the skill loaded in a without-skill run. No rates.
+
+The summary shows scored and skipped counts, each skip reason, and token usage summed from the CLI `result` events. The CLIs do not report USD cost in the trace, so cost has to be read from the provider dashboard.
+
+## Isolation
+
+Each run (with and without the skill) gets its own fresh, empty git workspace in a temporary root outside the repository. Prompts are held in memory, so no eval file (`triggers.json`, a prompt list, or the harness scripts) sits in or next to the workspace. The with-skill workspace gets only `feature-docs`, installed at project scope.
+
+The Cursor runner always starts the CLI with an empty temporary `HOME`, so global plugins, skills, rules, and chats under the real `~/.cursor` are not visible. Login is carried over in one of two ways:
+
+- `CURSOR_API_KEY` in the environment, if set. Nothing is copied.
+- Otherwise only `${XDG_CONFIG_HOME:-~/.config}/cursor/auth.json` is copied into the temporary `HOME` with mode 0600. It is removed with that `HOME` when the run ends, including on timeout.
+
+A hard kill -9 of the wrapper can leave the auth.json temp copy in /tmp.
+
+## Token refresh
+
+`CURSOR_API_KEY` is the preferred way to run evals. With the auth.json copy, a refreshed token is not written back, so run `cursor-agent status` after the first real run to confirm the login still works.
+
+The Claude runner already used a temporary `HOME` and `CLAUDE_CONFIG_DIR` that receive only the credentials file.
+
+This is not a sandbox. The agent runs as your user and could still read any absolute path it guesses, such as the repository clone. Keep the clone outside the temporary directory if you want it harder to stumble on, and read the without-skill control: a load there marks the run contaminated.
+
+## Early stop
+
+By default a run ends as soon as the trace shows a `feature-docs` load (a Skill call or a read of a `feature-docs/SKILL.md`), or after the agent has started 4 tool calls without one. The with-skill arm counts a read of the selected installation only. The without-skill arm counts a read of any installation. That is the same rule the scorer uses. The supervisor stops the whole process group and appends a `{"type":"harness_stop"}` line, so the partial trace still scores. The reason is kept per run as `early_stop_with` and `early_stop_without`.
+
+Tradeoff: this cuts cost and time a lot, because the agent never goes on to do the task. A skill loaded only after the Nth tool call is counted as not loaded, which can lower recall. A near-miss prompt whose real load would happen after tool N is scored as not loaded, which can inflate precision. Results at different `--stop-after-tools` values are not comparable. Raise `--stop-after-tools`, or set it to 0, to measure late loads. Early stopped runs have no `result` event, so they report no token usage.
+
 The timeout supervisor stops the runner and its child processes together, allows one second for cleanup, then kills any remaining processes. Node is required on both macOS and Linux. Relative `--out` paths are resolved from the directory where the harness was started.
 
 ## Runner contract

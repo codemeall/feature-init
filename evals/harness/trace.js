@@ -76,7 +76,7 @@ function scan(value, skill, skillDir, state) {
   }
   if (!value || typeof value !== "object") return;
 
-  if (value.type === "result") state.sawResult = true;
+  if (value.type === "result" || value.type === "harness_stop") state.sawResult = true;
 
   if (value.type === "tool_use" && value.name === "Skill" && value.input && typeof value.input === "object") {
     for (const key of SKILL_INPUT_KEYS) {
@@ -189,32 +189,79 @@ function formatRate(value) {
   return value.toFixed(4);
 }
 
+function hasBothClasses(rows) {
+  let trigger = false;
+  let nearMiss = false;
+  for (const row of rows) {
+    if (row.expected === "trigger") trigger = true;
+    else if (row.expected === "near_miss") nearMiss = true;
+  }
+  return trigger && nearMiss;
+}
+
 function report(argv) {
   const observationsFile = flag(argv, "--observations");
   const requested = flag(argv, "--status");
   const runner = flag(argv, "--runner");
   const outDir = flag(argv, "--out");
   const error = optionalFlag(argv, "--error");
-  const rows = readObservations(observationsFile).map((row) => ({ ...row, outcome: outcome(row) }));
-  const scored = requested === "complete" ? scoreRows(rows) : null;
+  const model = optionalFlag(argv, "--model") || null;
+  const minScored = Number(optionalFlag(argv, "--min-scored") || "0.8");
+  const maxPrompts = Number(optionalFlag(argv, "--max-prompts") || "0");
+  const catalogSize = Number(optionalFlag(argv, "--catalog-size") || "0");
+  const stopAfterToolsText = optionalFlag(argv, "--stop-after-tools");
+  const stopAfterTools = stopAfterToolsText === "" ? null : Number(stopAfterToolsText);
+  const rows = readObservations(observationsFile).map((row) => ({ ...row, outcome: row.skipped ? "skipped" : outcome(row) }));
+  const scoredRows = rows.filter((row) => !row.skipped);
+  const skippedCount = rows.length - scoredRows.length;
+  // A cap above the catalog is not a truncation. Omitting the catalog size
+  // still treats a positive --max-prompts as a truncated smoke set.
+  const truncated = maxPrompts > 0 && (catalogSize <= 0 || rows.length < catalogSize);
+  // Zero scored rows stay incomplete even when --min-scored is 0.
+  const enough = rows.length > 0 && scoredRows.length > 0 && scoredRows.length / rows.length >= minScored;
+  const bothClasses = hasBothClasses(scoredRows);
+  let preview = null;
+  if (scoredRows.length > 0 && enough) preview = scoreRows(scoredRows);
   let status = requested;
-  if (requested === "complete" && scored.contaminated) status = "contaminated";
-  const metrics = status === "complete" ? scored : {
+  if (requested === "complete" && preview && preview.contaminated) status = "contaminated";
+  else if (requested === "complete" && !enough) status = "incomplete";
+  else if (requested === "complete" && !bothClasses) status = "incomplete";
+  else if (requested === "complete" && truncated) status = "smoke";
+  else if (requested === "complete" && skippedCount > 0) status = "partial";
+  const claimRates = status === "complete" || status === "partial";
+  const metrics = claimRates ? preview : {
     contaminated: status === "contaminated",
-    contaminated_count: scored ? scored.contaminated_count : rows.filter((row) => row.loaded_without_skill).length,
-    true_positive: scored ? scored.true_positive : null,
-    false_negative: scored ? scored.false_negative : null,
-    false_positive: scored ? scored.false_positive : null,
-    true_negative: scored ? scored.true_negative : null,
+    contaminated_count: preview ? preview.contaminated_count : scoredRows.filter((row) => row.loaded_without_skill).length,
+    true_positive: preview ? preview.true_positive : null,
+    false_negative: preview ? preview.false_negative : null,
+    false_positive: preview ? preview.false_positive : null,
+    true_negative: preview ? preview.true_negative : null,
     precision: null,
     recall: null,
   };
+  const usage = { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, runs_with_usage: 0, runs: 0 };
+  for (const row of rows) {
+    for (const u of [row.usage_with, row.usage_without]) {
+      usage.runs += 1;
+      if (!u || typeof u !== "object") continue;
+      usage.runs_with_usage += 1;
+      usage.input_tokens += Number(u.inputTokens ?? u.input_tokens ?? 0);
+      usage.output_tokens += Number(u.outputTokens ?? u.output_tokens ?? 0);
+      usage.cache_read_tokens += Number(u.cacheReadTokens ?? u.cache_read_input_tokens ?? 0);
+    }
+  }
   const body = {
     status,
     runner,
+    model,
     skill: "feature-docs",
     error: error || null,
     prompts: rows.length,
+    scored: scoredRows.length,
+    skipped: skippedCount,
+    min_scored: minScored,
+    stop_after_tools: stopAfterTools,
+    usage,
     true_positive: metrics.true_positive,
     false_positive: metrics.false_positive,
     false_negative: metrics.false_negative,
@@ -230,33 +277,52 @@ function report(argv) {
     "# Harness trigger eval",
     "",
     `Runner: ${runner}`,
+    `Model: ${model || "CLI default"}`,
+    `Stop after tools: ${stopAfterTools === null ? "not set" : stopAfterTools}`,
     `Status: ${status}`,
-    error ? `Error: ${error}` : "",
+  ];
+  if (error) lines.push(`Error: ${error}`);
+  lines.push(
     "",
-    `Precision: ${formatRate(body.precision)}`,
-    `Recall: ${formatRate(body.recall)}`,
+    `Scored: ${scoredRows.length} of ${rows.length} prompts. Skipped: ${skippedCount}.`,
+    `Usage: ${usage.input_tokens} input, ${usage.output_tokens} output, ${usage.cache_read_tokens} cache read tokens from ${usage.runs_with_usage} of ${usage.runs} runs. Early stopped runs report no usage. USD cost is not in the trace.`,
+    "Skipped prompts (timeout, runner failure, unreadable trace) are left out of precision and recall.",
+    `Status incomplete means fewer than ${Math.round(minScored * 100)}% of prompts were scored, a class has no scored row, or nothing scored, so no rates are claimed. Partial means some were skipped and both classes scored.`,
+    "",
+  );
+  if (status === "smoke") {
+    lines.push("Smoke: --max-prompts truncated the prompt set. Precision and recall are not claimed.");
+  } else {
+    lines.push(`Precision: ${formatRate(body.precision)}`);
+    lines.push(`Recall: ${formatRate(body.recall)}`);
+  }
+  lines.push(
     "",
     "Precision is true positives divided by every prompt that loaded the skill only in the with-skill run.",
     "Recall is true positives divided by the should-trigger prompts.",
     "A load is a Skill tool call or a read of the installed SKILL.md in the CLI trace.",
     "Reply text is ignored. A without-skill load makes the comparison invalid, so precision and recall stay unset.",
     "",
-    "| Expected | With skill | Without skill | Outcome | Prompt |",
-    "| --- | --- | --- | --- | --- |",
-  ];
+    "| Expected | With skill | Without skill | Outcome | Note | Prompt |",
+    "| --- | --- | --- | --- | --- | --- |",
+  );
   for (const row of rows) {
     const prompt = String(row.prompt).replace(/\|/g, "/");
     lines.push(
-      `| ${row.expected} | ${row.loaded_with_skill ? "loaded" : "not loaded"} | ${row.loaded_without_skill ? "loaded" : "not loaded"} | ${row.outcome} | ${prompt} |`,
+      row.skipped
+        ? `| ${row.expected} | | | skipped | ${String(row.skip_reason).replace(/\|/g, "/")} | ${prompt} |`
+        : `| ${row.expected} | ${row.loaded_with_skill ? "loaded" : "not loaded"} | ${row.loaded_without_skill ? "loaded" : "not loaded"} | ${row.outcome} | ${[row.early_stop_with, row.early_stop_without].filter(Boolean).join(", ")} | ${prompt} |`,
     );
   }
-  if (rows.length === 0) lines.push("| | | | | no completed prompts |");
+  if (rows.length === 0) lines.push("| | | | | | no completed prompts |");
   lines.push("");
-  fs.writeFileSync(path.join(outDir, "summary.md"), `${lines.filter((line, index) => !(index === 4 && line === "")).join("\n")}\n`);
+  fs.writeFileSync(path.join(outDir, "summary.md"), `${lines.join("\n")}\n`);
   process.stdout.write(`status ${status}\n`);
   process.stdout.write(`precision ${formatRate(body.precision)}\n`);
   process.stdout.write(`recall ${formatRate(body.recall)}\n`);
+  process.stdout.write(`scored ${scoredRows.length} of ${rows.length}\n`);
   if (status === "contaminated") process.exit(2);
+  if (status === "incomplete" && requested === "complete") process.exit(3);
 }
 
 function scoreCommand(file) {
@@ -264,9 +330,55 @@ function scoreCommand(file) {
   process.stdout.write(`${JSON.stringify(scoreRows(rows))}\n`);
 }
 
+// Counts tool calls the agent started. Cursor emits tool_call started events.
+// Claude emits tool_use blocks inside assistant messages.
+function countToolCalls(value) {
+  if (Array.isArray(value)) return value.reduce((sum, item) => sum + countToolCalls(item), 0);
+  if (!value || typeof value !== "object") return 0;
+  let count = 0;
+  if (value.type === "tool_call" && value.subtype === "started") count += 1;
+  if (value.type === "tool_use") count += 1;
+  for (const child of Object.values(value)) count += countToolCalls(child);
+  return count;
+}
+
+// Stop when the same load the scorer would count is visible, or after maxTools
+// started tool calls. anyInstall and skillDir must match the skill-loaded
+// check for this arm, so a read of a different installation does not stop a
+// with-skill run that would score as not loaded.
+function earlyStopReason(events, skill, maxTools, options = {}) {
+  const anyInstall = options.anyInstall === undefined ? true : options.anyInstall === true;
+  const skillDir = typeof options.skillDir === "string" ? options.skillDir : "";
+  const state = { loaded: false, sawResult: false, anyInstall };
+  let tools = 0;
+  for (const event of events) {
+    scan(event, skill, skillDir, state);
+    tools += countToolCalls(event);
+  }
+  if (state.loaded) return "skill_loaded";
+  if (maxTools > 0 && tools >= maxTools) return "tool_limit";
+  return "";
+}
+
+// Prints the harness stop reason and token usage recorded in a trace.
+function meta(argv) {
+  const read = readTrace(flag(argv, "--trace"));
+  const out = { early_stop: null, usage: null };
+  for (const event of read.events || []) {
+    if (event && event.type === "harness_stop") out.early_stop = event.reason || "stopped";
+    if (event && event.type === "result" && event.usage) out.usage = event.usage;
+  }
+  process.stdout.write(`${JSON.stringify(out)}\n`);
+}
+
+module.exports = { readTrace, earlyStopReason };
+
 const command = process.argv[2];
 const rest = process.argv.slice(3);
-if (command === "skill-loaded") skillLoaded(rest);
+if (require.main !== module) {
+  // Loaded as a library.
+} else if (command === "skill-loaded") skillLoaded(rest);
+else if (command === "meta") meta(rest);
 else if (command === "score") scoreCommand(rest[0]);
 else if (command === "report") report(rest);
 else {
