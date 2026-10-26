@@ -2,13 +2,22 @@
 
 This runs every prompt in `evals/triggers.json` through a real agent CLI. Each prompt runs once in a temporary project where `feature-docs` is installed, and once in a project where it is not.
 
-A skill load is taken from the CLI trace:
+A load is taken from the CLI trace, and only from the skill under test:
 
 - a `Skill` tool call whose name is `feature-docs`
 - a `Read` tool call whose path is that install's `SKILL.md`
 - a Cursor `tool_call` that reads the same file, or a skill tool call named `feature-docs`
 
-Reply text is ignored. The run writes `results.json` and `summary.md` with precision, recall, and one row per prompt.
+The with-skill arm matches the selected install. The without-skill arm matches any install of `feature-docs`, so a control agent that opens that `SKILL.md` invalidates the comparison.
+
+These traces do not count as a load:
+
+- reply text
+- a path that only contains the string `feature-docs` (including a temp directory name)
+- a read of a different skill's `SKILL.md`
+- a directory listing, glob, or search that names the file and does not read it
+
+The run writes `results.json` and `summary.md` with precision, recall, and one row per prompt.
 
 Precision is true positives divided by prompts that loaded the skill only when it was installed. Recall is true positives divided by the should-trigger prompts. If the skill loads when it is not installed, the comparison is invalid and both rates stay unset.
 
@@ -48,14 +57,14 @@ The summary shows scored and skipped counts, each skip reason, and token usage s
 
 ## Isolation
 
-Each run (with and without the skill) gets its own fresh, empty git workspace in a temporary root outside the repository. Prompts are held in memory, so no eval file (`triggers.json`, a prompt list, or the harness scripts) sits in or next to the workspace. The with-skill workspace gets only `feature-docs`, installed at project scope.
+Each arm gets its own fresh, empty git workspace in a temporary root outside the repository. The control arm runs first. Its workspace is removed before `feature-docs` is installed for the other arm, so the two workspaces are never on disk together. Temp directories are named `harness-eval.*`, `harness-cursor-home.*`, and `harness-claude.*`. Those names, and the workspace README, do not contain the skill name. Prompts are held in memory, so no eval file (`triggers.json`, a prompt list, or the harness scripts) sits in or next to the workspace. The with-skill workspace gets only `feature-docs`, installed at project scope.
 
 The Cursor runner always starts the CLI with an empty temporary `HOME`, so global plugins, skills, rules, and chats under the real `~/.cursor` are not visible. Login is carried over in one of two ways:
 
 - `CURSOR_API_KEY` in the environment, if set. Nothing is copied.
-- Otherwise only `${XDG_CONFIG_HOME:-~/.config}/cursor/auth.json` is copied into the temporary `HOME` with mode 0600. It is removed with that `HOME` when the run ends, including on timeout.
+- Otherwise only `${XDG_CONFIG_HOME:-~/.config}/cursor/auth.json` is copied into the temporary `HOME` with mode 0600.
 
-A hard kill -9 of the wrapper can leave the auth.json temp copy in /tmp.
+The runner records that directory beside the trace. After the agent process group is gone, the supervisor deletes it, including when the agent ignores SIGTERM and keeps writing plugin caches. A kill -9 of the harness process itself can still leave the directory, because the supervisor is gone too.
 
 ## Token refresh
 
@@ -67,7 +76,7 @@ This is not a sandbox. The agent runs as your user and could still read any abso
 
 ## Early stop
 
-By default a run ends as soon as the trace shows a `feature-docs` load (a Skill call or a read of a `feature-docs/SKILL.md`), or after the agent has started 4 tool calls without one. The with-skill arm counts a read of the selected installation only. The without-skill arm counts a read of any installation. That is the same rule the scorer uses. The supervisor stops the whole process group and appends a `{"type":"harness_stop"}` line, so the partial trace still scores. The reason is kept per run as `early_stop_with` and `early_stop_without`.
+By default a run ends as soon as the trace shows a `feature-docs` load (a Skill call or a read of that skill's `SKILL.md`), or after the agent has started 4 tool calls without one. The with-skill arm counts a read of the selected installation only. The without-skill arm counts a read of any installation of `feature-docs`. A listing of a skill directory, or a read of a different skill, does not count and does not stop the run with `skill_loaded`. That is the same rule the scorer uses. The supervisor stops the whole process group and appends a `{"type":"harness_stop"}` line, so the partial trace still scores. The reason is kept per run as `early_stop_with` and `early_stop_without`.
 
 Tradeoff: this cuts cost and time a lot, because the agent never goes on to do the task. A skill loaded only after the Nth tool call is counted as not loaded, which can lower recall. A near-miss prompt whose real load would happen after tool N is scored as not loaded, which can inflate precision. Results at different `--stop-after-tools` values are not comparable. Raise `--stop-after-tools`, or set it to 0, to measure late loads. Early stopped runs have no `result` event, so they report no token usage.
 
@@ -85,7 +94,7 @@ skill-loaded --trace FILE --skill NAME --skill-dir DIR [--any-install]
 ```
 
 `probe` exits 0 when the CLI and credentials are present, and 3 when they are not. `agent` prints `claude`, `cursor`, `codex`, or `antigravity` so the harness can install that target. `run` writes the CLI's JSONL trace to `--trace` and exits non-zero on failure. `skill-loaded` exits 0 when the trace shows a load, 1 when the trace finished and the skill did not load, and 2 when the trace cannot be read. Exit 2 is not a negative.
-Reads must match the selected installation. For the without-skill control, the harness passes `--any-install` so reads from a global or another project installation also invalidate the comparison. Writes and searches never count as loads.
+Reads must match the selected installation. For the without-skill control, the harness passes `--any-install` so a read of `feature-docs/SKILL.md` from any install also invalidates the comparison. Writes, searches, directory listings, and reads of a different skill never count as loads.
 
 Pass a path to use your own runner:
 

@@ -1,0 +1,2 @@
+{"type":"tool_call","subtype":"started","tool_call":{"readToolCall":{"args":{"path":"/tmp/feature-docs-harness.example/ws.treat/.cursor/skills/feature-docs/SKILL.md"}}}}
+{"type":"harness_stop","reason":"skill_loaded"}

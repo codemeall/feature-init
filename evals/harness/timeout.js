@@ -1,7 +1,10 @@
 "use strict";
 
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 const { spawn } = require("node:child_process");
-const { constants } = require("node:os");
+const { earlyStopReason } = require("./trace.js");
 
 const seconds = Number(process.argv[2]);
 const command = process.argv[3];
@@ -28,8 +31,6 @@ const watchAnyInstall = process.env.HARNESS_WATCH_ANY_INSTALL !== "0";
 const maxTools = Number(process.env.HARNESS_STOP_AFTER_TOOLS || "0");
 let watcher = null;
 if (watchTrace) {
-  const fs = require("node:fs");
-  const { earlyStopReason } = require("./trace.js");
   watcher = setInterval(() => {
     if (stopping || !fs.existsSync(watchTrace)) return;
     const lines = fs.readFileSync(watchTrace, "utf8").split(/\r?\n/);
@@ -48,6 +49,57 @@ if (watchTrace) {
       stop("SIGTERM", 0);
     }
   }, 250);
+}
+
+function tracePath() {
+  const index = process.argv.indexOf("--trace");
+  if (index === -1 || index + 1 >= process.argv.length) return "";
+  return process.argv[index + 1];
+}
+
+// The runner records the temp HOME (or Claude work dir) beside the trace.
+// Delete it only after the agent is dead. A SIGTERM trap can race a process
+// that ignores the signal and keeps writing plugin caches.
+function isHarnessTemp(dir) {
+  if (typeof dir !== "string" || !path.isAbsolute(dir) || dir.includes("\0")) return false;
+  const resolved = path.resolve(dir);
+  if (!/^harness-(cursor-home|claude)\.[A-Za-z0-9]+$/.test(path.basename(resolved))) return false;
+  let parent = path.dirname(resolved);
+  let tmp = os.tmpdir();
+  try {
+    parent = fs.realpathSync(parent);
+  } catch {
+    return false;
+  }
+  try {
+    tmp = fs.realpathSync(tmp);
+  } catch {
+    // Keep the raw tmpdir when it cannot be resolved.
+  }
+  return parent === tmp || parent === "/tmp" || parent === "/private/tmp";
+}
+
+function removeRecordedTemp() {
+  const trace = tracePath();
+  if (!trace) return;
+  const marker = `${trace}.cleanup`;
+  let text = "";
+  try {
+    text = fs.readFileSync(marker, "utf8");
+  } catch {
+    return;
+  }
+  const dir = text.trim();
+  if (dir !== "" && !isHarnessTemp(dir)) {
+    process.stderr.write("refusing to remove unexpected harness temp path\n");
+    return;
+  }
+  try {
+    if (dir !== "") fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(marker, { force: true });
+  } catch (error) {
+    process.stderr.write(`harness temp cleanup failed: ${error.message}\n`);
+  }
 }
 
 function signalGroup(signal) {
@@ -69,7 +121,8 @@ function stop(signal, status) {
   // even when the wrapper has already exited or the agent ignored SIGTERM.
   setTimeout(() => {
     signalGroup("SIGKILL");
-    if (stopNote) require("node:fs").appendFileSync(stopNote.file, `${stopNote.line}\n`);
+    removeRecordedTemp();
+    if (stopNote) fs.appendFileSync(stopNote.file, `${stopNote.line}\n`);
     process.exit(status);
   }, 1000);
 }
@@ -94,5 +147,6 @@ child.on("exit", (code, signal) => {
   } catch {
     // signalGroup ignores ESRCH. Any other error is ignored here on purpose.
   }
-  process.exit(code === null ? 128 + constants.signals[signal] : code);
+  removeRecordedTemp();
+  process.exit(code === null ? 128 + os.constants.signals[signal] : code);
 });

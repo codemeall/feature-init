@@ -1,0 +1,4 @@
+{"type":"tool_call","subtype":"started","tool_call":{"globToolCall":{"args":{"targetDirectory":"/tmp/feature-docs-harness.example","globPattern":"**/*"}}}}
+{"type":"tool_call","subtype":"completed","tool_call":{"globToolCall":{"args":{"targetDirectory":"/tmp/feature-docs-harness.example","globPattern":"**/*"},"result":{"success":{"path":"/tmp/feature-docs-harness.example","files":["ws.treat/.cursor/skills/feature-docs/SKILL.md","/tmp/feature-docs-harness.example/ws.treat/.cursor/skills/feature-docs/SKILL.md","ws.ctrl/README.md"]}}}}}
+{"type":"tool_call","subtype":"started","tool_call":{"lsToolCall":{"args":{"path":"/tmp/feature-docs-cursor-home.example/.cursor"}}}}
+{"type":"result","subtype":"success"}
