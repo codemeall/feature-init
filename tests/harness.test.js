@@ -630,6 +630,7 @@ setInterval(write, 50);
     assert.equal(fs.existsSync(record), true, "stub CLI did not start");
     recorded = fs.readFileSync(record, "utf8");
     assert.equal(recorded.includes("//"), false, `temp path was not canonical: ${recorded}`);
+    assert.equal(recorded.includes("\\"), false, `temp path was not canonical: ${recorded}`);
     assert.equal(recorded, path.resolve(recorded), recorded);
     assert.equal(fs.existsSync(recorded), false, `temporary home survived: ${recorded}`);
     assert.equal(fs.existsSync(path.join(recorded, ".cursor/plugins/cache/keep.txt")), false);
