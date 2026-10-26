@@ -15,6 +15,18 @@ function workspace(t) {
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
+function assertNoCleanupMarkers(dir) {
+  const found = [];
+  const walk = (current) => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith(".cleanup")) found.push(full);
+    }
+  };
+  walk(dir);
+  assert.deepEqual(found, []);
+}
 function loaded(file, skillDir, flags = []) {
   return spawnSync(process.execPath, [path.join(harness, "trace.js"), "skill-loaded",
     "--trace", file, "--skill", "feature-docs", "--skill-dir", skillDir, ...flags], { encoding: "utf8" });
@@ -218,6 +230,7 @@ console.log(JSON.stringify({type:"result",subtype:"success"}));
   }
   assert.equal(report.prompts, 24);
   assert.equal(fs.readdirSync(path.join(dir, "relative results/traces")).filter((f) => f.endsWith(".jsonl")).length, 48);
+  assertNoCleanupMarkers(path.join(dir, "relative results"));
 });
 }
 
@@ -362,6 +375,7 @@ test("Cursor runs use an isolated HOME, an empty workspace, only the auth file, 
   assert.doesNotMatch(summary, /^Precision: [0-9]/m);
   assert.doesNotMatch(summary, /^Recall: [0-9]/m);
   assert.deepEqual(report.results.map((r) => r.expected), ["trigger", "near_miss"]);
+  assertNoCleanupMarkers(path.join(dir, "out"));
 });
 
 test("HARNESS_MODEL is the model fallback", (t) => {
@@ -405,6 +419,7 @@ test("early stop ends a run at the first skill load, and after N tool calls with
     assert.equal(trigger.early_stop_with, loaded ? "skill_loaded" : "tool_limit");
     assert.equal(result.status, 0, result.stderr);
     assertHomesRemoved(env.PROBE_LOG);
+    assertNoCleanupMarkers(path.join(dir, "out"));
   }
 });
 
@@ -489,9 +504,40 @@ test("harness early stop uses the same install the scorer uses", (t) => {
   assert.equal(result.status, 2, result.stderr);
 });
 
+test("cleanup refuses a marker that escapes through .. and a symlink parent", (t) => {
+  const dir = workspace(t);
+  const trace = path.join(dir, "trace.jsonl");
+  fs.writeFileSync(trace, "");
+  const marker = `${trace}.cleanup`;
+  const lexical = fs.mkdtempSync(path.join(os.tmpdir(), "harness-claude."));
+  const secretParent = path.join(dir, "secret");
+  const secretChild = path.join(secretParent, "child");
+  fs.mkdirSync(secretChild, { recursive: true });
+  const kernelVictim = path.join(secretParent, path.basename(lexical));
+  fs.mkdirSync(kernelVictim);
+  fs.writeFileSync(path.join(lexical, "keep.txt"), "lexical");
+  fs.writeFileSync(path.join(kernelVictim, "keep.txt"), "kernel");
+  const link = `${lexical}lnk`;
+  fs.symlinkSync(secretChild, link);
+  t.after(() => {
+    fs.rmSync(link, { force: true });
+    fs.rmSync(lexical, { recursive: true, force: true });
+  });
+  fs.writeFileSync(marker, `${link}/../${path.basename(lexical)}\n`);
+  const result = spawnSync(process.execPath, [path.join(harness, "timeout.js"), "5", "/bin/true", "--trace", trace], {
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /refusing to remove unexpected harness temp path/);
+  assert.equal(fs.existsSync(path.join(lexical, "keep.txt")), true, "lexical temp dir was removed");
+  assert.equal(fs.existsSync(path.join(kernelVictim, "keep.txt")), true, "symlink .. target was removed");
+  assert.equal(fs.existsSync(marker), true, "refused cleanup removed the marker");
+  assert.equal(fs.existsSync(link), true, "symlink parent was removed");
+});
+
 test("detector ignores temp paths, other skills, and directory listings", () => {
-  const skillDir = "/tmp/feature-docs-harness.example/ws.ctrl/.cursor/skills/feature-docs";
-  const installed = "/tmp/feature-docs-harness.example/ws.treat/.cursor/skills/feature-docs";
+  const skillDir = "/tmp/harness-eval.example/ws.ctrl/.cursor/skills/feature-docs";
+  const installed = "/tmp/harness-eval.example/ws.treat/.cursor/skills/feature-docs";
   const cases = [
     ["cursor-control-search.jsonl", 1],
     ["cursor-other-skill.jsonl", 1],
@@ -509,6 +555,9 @@ test("detector ignores temp paths, other skills, and directory listings", () => 
   const sibling = path.join(harness, "testdata/cursor-sibling-skill-read.jsonl");
   assert.equal(loaded(sibling, skillDir).status, 1, "a sibling install is not the selected install");
   assert.equal(loaded(sibling, installed).status, 0, "a read of the selected SKILL.md is a load");
+  const oldNames = fs.readFileSync(path.join(harness, "testdata/cursor-control-search.jsonl"), "utf8");
+  assert.match(oldNames, /feature-docs-harness/);
+  assert.match(oldNames, /feature-docs-cursor-home/);
 });
 
 test("a control run cannot see the skill installed for the other arm", (t) => {
@@ -580,6 +629,7 @@ setInterval(write, 50);
     recorded = fs.readFileSync(record, "utf8");
     assert.equal(fs.existsSync(recorded), false, `temporary home survived: ${recorded}`);
     assert.equal(fs.existsSync(path.join(recorded, ".cursor/plugins/cache/keep.txt")), false);
+    assert.equal(fs.existsSync(path.join(dir, "trace.jsonl.cleanup")), false, "cleanup marker survived the kill");
   });
 }
 

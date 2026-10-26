@@ -1,4 +1,4 @@
-{"type":"tool_call","subtype":"started","tool_call":{"readToolCall":{"args":{"path":"/tmp/feature-docs-cursor-home.example/.cursor/plugins/cache/mattpocock/skills/productivity/writing-for-agents/SKILL.md"}}}}
+{"type":"tool_call","subtype":"started","tool_call":{"readToolCall":{"args":{"path":"/tmp/harness-cursor-home.example/.cursor/plugins/cache/mattpocock/skills/productivity/writing-for-agents/SKILL.md"}}}}
 {"type":"tool_call","subtype":"started","tool_call":{"skillToolCall":{"args":{"name":"writing-for-agents"}}}}
-{"type":"tool_call","subtype":"completed","tool_call":{"readToolCall":{"args":{"path":"/tmp/feature-docs-cursor-home.example/.cursor/plugins/cache/mattpocock/skills/productivity/writing-for-agents/SKILL.md"},"result":{"success":{"path":"/tmp/feature-docs-cursor-home.example/.cursor/plugins/cache/mattpocock/skills/productivity/writing-for-agents/SKILL.md","content":"other skill\n"}}}}}
+{"type":"tool_call","subtype":"completed","tool_call":{"readToolCall":{"args":{"path":"/tmp/harness-cursor-home.example/.cursor/plugins/cache/mattpocock/skills/productivity/writing-for-agents/SKILL.md"},"result":{"success":{"path":"/tmp/harness-cursor-home.example/.cursor/plugins/cache/mattpocock/skills/productivity/writing-for-agents/SKILL.md","content":"other skill\n"}}}}}
 {"type":"harness_stop","reason":"tool_limit"}

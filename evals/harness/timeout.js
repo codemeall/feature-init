@@ -90,12 +90,16 @@ function removeRecordedTemp() {
     return;
   }
   const dir = text.trim();
-  if (dir !== "" && !isHarnessTemp(dir)) {
+  // path.resolve is lexical, so a marker such as
+  // /tmp/harness-claude.lnk/../harness-claude.zzz still looks canonical.
+  // The kernel then resolves ".." through the symlink. Require the raw
+  // string to already be canonical, and delete that canonical path.
+  if (dir !== "" && (dir !== path.resolve(dir) || !isHarnessTemp(dir))) {
     process.stderr.write("refusing to remove unexpected harness temp path\n");
     return;
   }
   try {
-    if (dir !== "") fs.rmSync(dir, { recursive: true, force: true });
+    if (dir !== "") fs.rmSync(path.resolve(dir), { recursive: true, force: true });
     fs.rmSync(marker, { force: true });
   } catch (error) {
     process.stderr.write(`harness temp cleanup failed: ${error.message}\n`);
