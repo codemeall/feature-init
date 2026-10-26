@@ -55,15 +55,22 @@ The Cursor runner always starts the CLI with an empty temporary `HOME`, so globa
 - `CURSOR_API_KEY` in the environment, if set. Nothing is copied.
 - Otherwise only `${XDG_CONFIG_HOME:-~/.config}/cursor/auth.json` is copied into the temporary `HOME` with mode 0600. It is removed with that `HOME` when the run ends, including on timeout.
 
+A hard kill -9 of the wrapper can leave the auth.json temp copy in /tmp.
+
+## Token refresh
+
+`CURSOR_API_KEY` is the preferred way to run evals. With the auth.json copy, a refreshed token is not written back, so run `cursor-agent status` after the first real run to confirm the login still works.
+
 The Claude runner already used a temporary `HOME` and `CLAUDE_CONFIG_DIR` that receive only the credentials file.
 
 This is not a sandbox. The agent runs as your user and could still read any absolute path it guesses, such as the repository clone. Keep the clone outside the temporary directory if you want it harder to stumble on, and read the without-skill control: a load there marks the run contaminated.
 
 ## Early stop
 
-By default a run ends as soon as the trace shows a `feature-docs` load (a Skill call or a read of a `feature-docs/SKILL.md`), or after the agent has started 4 tool calls without one. The supervisor stops the whole process group and appends a `{"type":"harness_stop"}` line, so the partial trace still scores. The reason is kept per run as `early_stop_with` and `early_stop_without`.
+By default a run ends as soon as the trace shows a `feature-docs` load (a Skill call or a read of a `feature-docs/SKILL.md`), or after the agent has started 4 tool calls without one. The with-skill arm counts a read of the selected installation only. The without-skill arm counts a read of any installation. That is the same rule the scorer uses. The supervisor stops the whole process group and appends a `{"type":"harness_stop"}` line, so the partial trace still scores. The reason is kept per run as `early_stop_with` and `early_stop_without`.
 
-Tradeoff: this cuts cost and time a lot, because the agent never goes on to do the task. A skill loaded only after the Nth tool call is counted as not loaded, which can lower recall. Raise `--stop-after-tools`, or set it to 0, to measure late loads. Early stopped runs have no `result` event, so they report no token usage.
+Tradeoff: this cuts cost and time a lot, because the agent never goes on to do the task. A skill loaded only after the Nth tool call is counted as not loaded, which can lower recall. A near-miss prompt whose real load would happen after tool N is scored as not loaded, which can inflate precision. Results at different `--stop-after-tools` values are not comparable. Raise `--stop-after-tools`, or set it to 0, to measure late loads. Early stopped runs have no `result` event, so they report no token usage.
+
 The timeout supervisor stops the runner and its child processes together, allows one second for cleanup, then kills any remaining processes. Node is required on both macOS and Linux. Relative `--out` paths are resolved from the directory where the harness was started.
 
 ## Runner contract
