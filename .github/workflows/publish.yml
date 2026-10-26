@@ -1,0 +1,104 @@
+# One-time manual step before the first tag (npm package settings, Trusted Publisher):
+#   GitHub Actions publisher for package feature-docs
+#   owner codemeall, repository feature-init, workflow publish.yml, environment npm-publish
+#   Allow direct `npm publish` for that publisher.
+# Create the GitHub environment npm-publish before tagging. A run creates a missing
+# environment with no protection rules.
+# The tagged commit must be on main, and the npm-publish environment should also allow only v* tags.
+name: publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+      - name: Run tests/test.sh
+        run: ./tests/test.sh
+      - name: Run harness tests
+        run: node --test tests/harness.test.js
+      - name: Dry-run npm pack
+        run: npm pack --dry-run
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: npm-publish
+    permissions:
+      id-token: write # OIDC token that npm exchanges for a short-lived publish credential
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Require npm >= 11.5.1 for trusted publishing
+        run: |
+          node -e '
+            const version = process.argv[1];
+            const [major, minor, patch] = version.split(".").map(Number);
+            const ok = major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1)));
+            if (!ok) {
+              console.error("npm " + version + " is below 11.5.1");
+              process.exit(1);
+            }
+            console.log("npm " + version + ", node " + process.version);
+          ' "$(npm --version)"
+      - name: Require the tag to equal v plus the package.json version
+        run: |
+          expected="v$(node -p 'require("./package.json").version')"
+          if [ "$GITHUB_REF_TYPE" != "tag" ] || [ "$GITHUB_REF_NAME" != "$expected" ]; then
+            echo "Ref '$GITHUB_REF_NAME' ($GITHUB_REF_TYPE) does not equal $expected from package.json."
+            exit 1
+          fi
+          echo "Tag $GITHUB_REF_NAME matches package.json."
+      - name: Require the tagged commit to be on main
+        run: |
+          if ! git rev-parse --verify --quiet origin/main >/dev/null; then
+            echo "tag is not on main: origin/main was not fetched, so $GITHUB_SHA cannot be checked."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "tag is not on main: $GITHUB_SHA is not an ancestor of origin/main."
+            exit 1
+          fi
+          echo "$GITHUB_SHA is on origin/main."
+      # npm generates provenance automatically for trusted publishing only from a public repository.
+      - name: Require a public repository
+        env:
+          REPO_VISIBILITY: ${{ github.event.repository.visibility }}
+        run: |
+          if [ "$REPO_VISIBILITY" != "public" ]; then
+            echo "Repository visibility is '$REPO_VISIBILITY'. npm does not generate provenance unless it is public."
+            exit 1
+          fi
+      - name: Publish with trusted publishing
+        run: npm publish --access public

@@ -4,7 +4,9 @@
 
 When a feature is built from a spec and tickets that live in `.scratch/`, the code reaches git and the reasoning does not. `feature-docs` is an agent skill that writes the reasoning down next to the code: one folder per feature, `docs/<feature>/feature-docs/`, describing what exists, why, what remains, and what was verified. It converts existing docs, reconciles changes, and points later agents at the record before they change the feature.
 
-The skill was called `feature-init` until 2026-10-06, and this repository still carries that name. See [Upgrading](./CHANGELOG.md#upgrading).
+The npm package is named `feature-docs`. The GitHub repository is named `feature-init`. Neither name is being changed. The skill was called `feature-init` until 2026-10-06. See [Upgrading](./CHANGELOG.md#upgrading).
+
+Version 2.0.0 was published to npm without npm provenance. The registry record for `feature-docs@2.0.0` has no provenance attestation.
 
 ## Why this exists
 
@@ -107,13 +109,9 @@ The agent reads `overview.md` for context, then `decisions.md` before proposing 
 
 The skill follows the [SKILL.md standard](https://agentskills.io) that Claude Code, Cursor, Codex and Antigravity read natively.
 
-```bash
-npx skills add codemeall/feature-init --skill feature-docs -g   # all projects
-npx skills add codemeall/feature-init --skill feature-docs      # the current project only
-npx skills add codemeall/feature-init --skill feature-docs -g -a claude-code -a codex -a cursor
-```
+Node 20 is the minimum for the `npx` commands below. `package.json` engines is `>=20`. Use the same commands on macOS and Linux. The clone path uses `bash` and does not need Node.
 
-Or from npm, which runs the bundled installer (same arguments as `install.sh` below):
+From npm. This runs the bundled `install.sh`:
 
 ```bash
 npx feature-docs@latest all                              # every supported agent, globally
@@ -121,7 +119,20 @@ npx feature-docs@latest claude --project .               # into the current repo
 npx feature-docs@latest all --force                      # update an existing install
 ```
 
-Or from a clone, with no Node:
+A global install writes only these directories:
+
+- `~/.claude/skills/feature-docs`
+- `~/.cursor/skills/feature-docs`
+- `~/.codex/skills/feature-docs`
+- `~/.gemini/config/skills/feature-docs`
+
+A `--project` install writes `<repo>/.claude/skills/feature-docs`, `<repo>/.cursor/skills/feature-docs`, `<repo>/.codex/skills/feature-docs`, and `<repo>/.agents/skills/feature-docs`.
+
+The package published as `feature-docs@2.0.0` accepts those install commands. It rejects `--uninstall` and `--remove-legacy`.
+
+Once published, 2.1.0 and later also accept `--uninstall` and `--remove-legacy` through npx (`npx feature-docs@latest --uninstall all`). 2.0.0 does not.
+
+From a clone of this repository, with no Node:
 
 ```bash
 git clone https://github.com/codemeall/feature-init.git && cd feature-init
@@ -129,16 +140,21 @@ git clone https://github.com/codemeall/feature-init.git && cd feature-init
 ./install.sh claude codex                         # only the ones you use
 ./install.sh cursor --project /path/to/your-repo  # into one repo, to commit with it
 ./install.sh all --force                          # replace an existing install
+./install.sh --uninstall all                      # remove feature-docs
+./install.sh --uninstall all --remove-legacy      # also remove old feature-init
 ```
 
-To uninstall:
+`install.sh` in this repository accepts `--uninstall` and `--remove-legacy`. `--remove-legacy` also deletes a legacy `feature-init` skill directory next to `feature-docs`.
+
+The third-party `skills` CLI is a different installer:
 
 ```bash
-npx feature-docs@latest --uninstall all                        # remove from all agents
-npx feature-docs@latest --uninstall claude --project .         # remove from project
-./install.sh --uninstall all                                   # from a clone
-./install.sh --uninstall all --remove-legacy                   # also remove old feature-init
+npx skills add codemeall/feature-init --skill feature-docs -g
+npx skills add codemeall/feature-init --skill feature-docs
+npx skills add codemeall/feature-init --skill feature-docs -g -a claude-code -a codex -a cursor
 ```
+
+That CLI writes `~/.agents/skills/feature-docs` for a global install, or `./.agents/skills/feature-docs` for a project install. With `-a claude-code` it also symlinks `~/.claude/skills/feature-docs` to the global copy. It does not create `~/.cursor/skills/feature-docs`, `~/.codex/skills/feature-docs`, or `~/.gemini/config/skills/feature-docs`. Use `npx feature-docs@latest` or `./install.sh` when you want those directories. Checked with the `skills` CLI on Linux, Node 20.20.2 and Node 22.23.4, in a clean home.
 
 For an agent without skill support, paste [`adapters/AGENTS-snippet.md`](./adapters/AGENTS-snippet.md) into the repo's `AGENTS.md`. Older Cursor versions can use the rule file [`adapters/feature-docs.mdc`](./adapters/feature-docs.mdc).
 
@@ -218,18 +234,34 @@ The trigger overlap script is an advisory smoke signal. It prints coverage and m
 ./evals/run-trigger-eval.sh --report
 ```
 
-The harness eval runs each prompt in `evals/triggers.json` through a real agent CLI, once with the skill installed and once without. It records a skill load only from the CLI tool trace, then writes precision, recall, and a per-prompt summary. It is not part of CI. If the CLI or credentials are missing it prints `SKIP` and exits 0, and it does not invent scores.
+The harness eval runs each prompt in `evals/triggers.json` through a real agent CLI, once with the skill installed and once without. It records a skill load only from the CLI tool trace, then writes precision, recall, and a per-prompt summary when it actually runs. It is not part of CI. If the CLI or credentials are missing it prints `SKIP` and exits 0, and it does not invent scores. No scored harness run is part of this release.
 ```bash
 ./evals/harness/run-harness-eval.sh --runner claude
 ./evals/harness/run-harness-eval.sh --runner cursor
 ```
 See [evals/harness/README.md](./evals/harness/README.md).
 
+## What is measured
+
+Measured:
+
+- The test suite, `./tests/test.sh` (this includes the quoted trigger phrase check).
+- The CI matrix in `.github/workflows/test.yml`: ubuntu-latest and macos-latest, each with Node 20, 22, and 24.
+- The advisory overlap scorer, `./evals/run-trigger-eval.sh`. It is a smoke signal. It does not decide whether the skill should trigger.
+
+Not measured:
+
+- Real-agent trigger precision and recall. See [issue #5](https://github.com/codemeall/feature-init/issues/5). A harness eval exists under `evals/harness/`, but it is unscored.
+
 ## System requirements
 
 Requires bash, git, awk, and `shasum` or `sha256sum`. Windows requires WSL or Git Bash.
 
 Node 18 support was dropped because Node 18 is end of life. Node 20 is the minimum for the npx entry point (`package.json` engines is `>=20`). CI runs the test suite on Node 20, 22, and 24 for both Ubuntu and macOS.
+
+## Security
+
+Report a vulnerability privately. See [SECURITY.md](./SECURITY.md).
 
 ## License
 
