@@ -19,6 +19,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
+      - name: Print macOS bash version
+        if: runner.os == 'macOS'
+        run: /bin/bash --version
       - name: Verify scripts, compatibility, and packaged assets
         run: ./tests/test.sh
       - name: Pack and smoke test npx entry point
