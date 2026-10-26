@@ -284,6 +284,16 @@ function fakeCursorEnv(t, extra = {}) {
   return { dir, realHome, env };
 }
 
+function assertHomesRemoved(probeLog) {
+  const text = fs.readFileSync(probeLog, "utf8").trim();
+  assert.notEqual(text, "", "probe log was empty");
+  for (const line of text.split("\n")) {
+    const probe = JSON.parse(line);
+    assert.equal(fs.existsSync(probe.home), false, `temporary HOME survived: ${probe.home}`);
+    assert.equal(fs.existsSync(path.join(probe.home, ".config/cursor/auth.json")), false, `auth copy survived: ${probe.home}`);
+  }
+}
+
 function runHarness(dir, env, args, timeout = 60000) {
   return spawnSync("/bin/bash", [path.join(harness, "run-harness-eval.sh"), "--runner", "cursor", "--out", path.join(dir, "out"), ...args],
     { cwd: dir, encoding: "utf8", timeout, env });
@@ -361,6 +371,7 @@ test("a timeout is a skip with a reason, not an aborted run, and too few scored 
   assert.match(skipped.skip_reason, /timeout/);
   assert.equal(result.status, 1, result.stderr);
   assert.match(fs.readFileSync(path.join(dir, "out/summary.md"), "utf8"), /Scored: 1 of 2/);
+  assertHomesRemoved(env.PROBE_LOG);
 });
 
 test("early stop ends a run at the first skill load, and after N tool calls without one", (t) => {
@@ -378,6 +389,7 @@ test("early stop ends a run at the first skill load, and after N tool calls with
     assert.equal(trigger.loaded_without_skill, false);
     assert.equal(trigger.early_stop_with, loaded ? "skill_loaded" : "tool_limit");
     assert.equal(result.status, 0, result.stderr);
+    assertHomesRemoved(env.PROBE_LOG);
   }
 });
 
