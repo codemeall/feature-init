@@ -40,7 +40,7 @@ The Cursor runner prefers `cursor-agent`. A generic `agent` command is used only
 ```
 
 - `--model NAME` (env `HARNESS_MODEL`) is passed to the CLI as `--model`. Both runners support it. The model is written to `results.json` and `summary.md`.
-- `--timeout SECS` (env `EVAL_TIMEOUT`). A timeout, a runner failure, or an unreadable trace marks that prompt as skipped with a reason. The run continues.
+- `--timeout SECS` (env `EVAL_TIMEOUT`). A timeout, a runner failure, or an unreadable trace marks that prompt as skipped with a reason. The run continues. A skipped control arm skips the with-skill arm for that same prompt.
 - `--stop-after-tools N` (env `HARNESS_STOP_AFTER_TOOLS`, default 4, 0 disables). See Early stop.
 - `--max-prompts N` (env `HARNESS_MAX_PROMPTS`) runs only N prompts, alternating should-trigger and near-miss, for a cheap smoke run. When that cap truncates the catalog, the status is `smoke` and precision and recall are not claimed.
 - `--min-scored F` (env `HARNESS_MIN_SCORED`, default 0.8). If fewer than this fraction of prompts were scored, the status is `incomplete`, precision and recall stay unset, and the script exits 1. `0` still requires at least one scored row.
@@ -57,14 +57,14 @@ The summary shows scored and skipped counts, each skip reason, and token usage s
 
 ## Isolation
 
-Each arm gets its own fresh, empty git workspace in a temporary root outside the repository. The control arm runs first. Its workspace is removed before `feature-docs` is installed for the other arm, so the two workspaces are never on disk together. Temp directories are named `harness-eval.*`, `harness-cursor-home.*`, and `harness-claude.*`. Those names, and the workspace README, do not contain the skill name. Prompts are held in memory, so no eval file (`triggers.json`, a prompt list, or the harness scripts) sits in or next to the workspace. The with-skill workspace gets only `feature-docs`, installed at project scope.
+Each arm gets its own fresh, empty git workspace in a temporary root outside the repository. The control arm runs first, and its workspace is removed before `feature-docs` is installed for the other arm, so the two workspaces are never on disk together. A skipped control arm skips the with-skill arm for that prompt. Temp directories are named `harness-eval.*`, `harness-cursor-home.*`, and `harness-claude.*`. Those names, and the workspace README, do not contain the skill name. Prompts are held in memory, so no eval file (`triggers.json`, a prompt list, or the harness scripts) sits in or next to the workspace. The with-skill workspace gets only `feature-docs`, installed at project scope.
 
 The Cursor runner always starts the CLI with an empty temporary `HOME`, so global plugins, skills, rules, and chats under the real `~/.cursor` are not visible. Login is carried over in one of two ways:
 
 - `CURSOR_API_KEY` in the environment, if set. Nothing is copied.
 - Otherwise only `${XDG_CONFIG_HOME:-~/.config}/cursor/auth.json` is copied into the temporary `HOME` with mode 0600.
 
-The runner records that directory beside the trace. After the agent process group is gone, the supervisor deletes it, including when the agent ignores SIGTERM and keeps writing plugin caches. A kill -9 of the harness process itself can still leave the directory, because the supervisor is gone too.
+The runner records that directory beside the trace. On a normal exit the wrapper deletes its own temp directory and that marker. On timeout and early stop, the supervisor deletes the recorded directory after the process group is dead, which still runs when the agent ignores SIGTERM and keeps writing plugin caches. A kill -9 of the harness process itself can still leave the directory, because the supervisor is gone too.
 
 ## Token refresh
 
