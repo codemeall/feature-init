@@ -53,6 +53,8 @@ The Cursor runner prefers `cursor-agent`. A generic `agent` command is used only
 - `incomplete`: too few prompts scored, one class has no scored row, nothing scored, or the run stopped on an error. No rates.
 - `contaminated`: the skill loaded in a without-skill run. No rates.
 
+The harness does not stop at the first contaminated control row. Whether that should outrank `--min-scored`, and how to record prompts that never ran, is a scoring-policy choice.
+
 The summary shows scored and skipped counts, each skip reason, and token usage summed from the CLI `result` events. The CLIs do not report USD cost in the trace, so cost has to be read from the provider dashboard.
 
 ## Isolation

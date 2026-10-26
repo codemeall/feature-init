@@ -524,8 +524,15 @@ test("cleanup refuses a marker that escapes through .. and a symlink parent", (t
     fs.rmSync(lexical, { recursive: true, force: true });
   });
   fs.writeFileSync(marker, `${link}/../${path.basename(lexical)}\n`);
-  const result = spawnSync(process.execPath, [path.join(harness, "timeout.js"), "5", process.execPath, "-e", "process.exit(0)", "--trace", trace], {
+  // --trace after `node -e` is a V8 flag. It prints more than spawnSync's
+  // default 1 MB buffer, and the overflow kills timeout.js with SIGTERM.
+  // A script file keeps --trace as a script argument, which is how timeout.js
+  // finds the marker. maxBuffer stays large if that flag regresses.
+  const script = path.join(dir, "exit0.js");
+  fs.writeFileSync(script, "process.exit(0);\n");
+  const result = spawnSync(process.execPath, [path.join(harness, "timeout.js"), "5", process.execPath, script, "--trace", trace], {
     encoding: "utf8",
+    maxBuffer: 8 * 1024 * 1024,
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stderr, /refusing to remove unexpected harness temp path/);
