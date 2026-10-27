@@ -66,6 +66,8 @@ The Cursor runner always starts the CLI with an empty temporary `HOME`, so globa
 - `CURSOR_API_KEY` in the environment, if set. Nothing is copied.
 - Otherwise only `${XDG_CONFIG_HOME:-~/.config}/cursor/auth.json` is copied into the temporary `HOME` with mode 0600.
 
+On macOS the CLI keeps its login in the Keychain, so that file usually does not exist and `cursor-agent status` can pass anyway. `probe` checks for the file, not only `status`, and prints `SKIP` when neither it nor `CURSOR_API_KEY` is present. On a Mac, set `CURSOR_API_KEY`.
+
 The runner records that directory beside the trace. On a normal exit the wrapper deletes its own temp directory and that marker. On timeout and early stop, the supervisor deletes the recorded directory after the process group is dead, which still runs when the agent ignores SIGTERM and keeps writing plugin caches. A kill -9 of the harness process itself can still leave the directory, because the supervisor is gone too.
 
 ## Token refresh

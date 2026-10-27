@@ -34,6 +34,14 @@ probe() {
     echo "ready: cursor agent CLI with CURSOR_API_KEY"
     exit 0
   fi
+  # run starts the CLI with an empty HOME and carries over only this file.
+  # On macOS the CLI keeps its login in the Keychain, so status can pass
+  # while every run would still fail. Check the file run needs.
+  local auth="${XDG_CONFIG_HOME:-$HOME/.config}/cursor/auth.json"
+  if [[ ! -f "$auth" ]]; then
+    echo "cursor login is not in $auth, which run copies; set CURSOR_API_KEY (on macOS the CLI login is in the Keychain)"
+    exit 3
+  fi
   local rc=0
   run_with_timeout 20 "$bin" status >/dev/null 2>&1 || rc=$?
   if [[ "$rc" -eq 0 ]]; then

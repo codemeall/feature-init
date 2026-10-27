@@ -194,6 +194,33 @@ test("Cursor rejects unrelated programs named agent", (t) => {
   }
 });
 
+test("Cursor probe needs the same login that run copies, not only a passing status", (t) => {
+  const dir = workspace(t);
+  const bin = path.join(dir, "bin");
+  const home = path.join(dir, "home");
+  fs.mkdirSync(bin);
+  fs.mkdirSync(home);
+  // status passes, as it does on macOS when the login is in the Keychain.
+  fs.writeFileSync(path.join(bin, "cursor-agent"), "#!/bin/bash\n[[ \"$1\" == status ]] && { echo 'Logged in'; exit 0; }\nexit 1\n", { mode: 0o755 });
+  const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, HOME: home };
+  delete env.CURSOR_API_KEY;
+  delete env.XDG_CONFIG_HOME;
+  const probe = (extra = {}) => spawnSync("/bin/bash", [path.join(harness, "runners/cursor.sh"), "probe"],
+    { encoding: "utf8", env: { ...env, ...extra } });
+
+  let result = probe();
+  assert.equal(result.status, 3, result.stdout + result.stderr);
+  assert.match(result.stdout, /CURSOR_API_KEY/);
+
+  result = probe({ CURSOR_API_KEY: "fixture-only" });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+
+  fs.mkdirSync(path.join(home, ".config/cursor"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".config/cursor/auth.json"), "{}", { mode: 0o600 });
+  result = probe();
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+
 for (const contaminated of [false, true]) {
 test(`relative output paths work through the Claude runner (contaminated=${contaminated})`, (t) => {
   const dir = workspace(t);
