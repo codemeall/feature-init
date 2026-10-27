@@ -71,8 +71,16 @@ safe_relative() {
 
 # Resolve existing paths without realpath/Python, including symlinks, then enforce containment.
 contained_path() {
+  local rc=0
+  safe_relative "$2"
+  resolve_in_repo "$1" "$2" || rc=$?
+  [[ "$rc" -ne 3 ]] || die "path resolves outside the repo: $2"
+  return "$rc"
+}
+
+# 0 exists in the repo, 1 does not exist, 2 error, 3 resolves outside the repo.
+resolve_in_repo() {
   local repo="$1" path="$2" root resolved parent target hops=0
-  safe_relative "$path"
   root="$(cd "$repo" && pwd -P)" || return 2
   resolved="$root/$path"
   while :; do
@@ -84,7 +92,7 @@ contained_path() {
     target="$(readlink "$resolved")" || return 2
     case "$target" in /*) resolved="$target" ;; *) resolved="$parent/$target" ;; esac
   done
-  case "$resolved" in "$root"|"$root"/*) ;; *) die "path resolves outside the repo: $path" ;; esac
+  case "$resolved" in "$root"|"$root"/*) ;; *) return 3 ;; esac
   [[ -e "$resolved" ]]
 }
 
@@ -136,22 +144,32 @@ snapshot_dir() { # $1 = repo, $2 = slug
 # Repo files that overview.md cites and that no longer exist. A citation is a backticked token
 # with a slash that names a file (its last part has a dot) or a folder (it ends in a slash).
 # Only overview.md is checked: it claims what exists now, while decisions and tickets are history.
+# A leading ./ is dropped. Paths with .. or a middle ./, and paths that resolve outside the repo
+# through a symlink, cannot be checked as repo files and are skipped.
 missing_citations() { # $1 = repo, $2 = overview.md
-  local path
+  local cite path
   [[ -f "$2" ]] || return 0
   { grep -v '^>' "$2" | grep -oE '`[][A-Za-z0-9_.@+/()~-]+(:[0-9]+(-[0-9]+)?)?`' || true; } \
-    | tr -d '`' | sed -E 's/:[0-9]+(-[0-9]+)?$//' | LC_ALL=C sort -u | while IFS= read -r path; do
+    | tr -d '`' | sed -E 's/:[0-9]+(-[0-9]+)?$//' | LC_ALL=C sort -u | while IFS= read -r cite; do
+      path="$cite"
+      while [[ "$path" == ./* ]]; do path="${path#./}"; done
       case "$path" in
-        /*|'~'*|.scratch/*|.fleet/*|path/file*|*//*) continue ;;
+        /*|'~'*|.scratch/*|.fleet/*|path/file*|*//*|.|..|../*|*/..|*/../*|*/.|*/./*) continue ;;
         */) ;;
         */*) case "${path##*/}" in *.*) ;; *) continue ;; esac ;;
         *) continue ;;
       esac
       local rc=0
-      contained_path "$1" "${path%/}" || rc=$?
+      resolve_in_repo "$1" "${path%/}" || rc=$?
       [[ "$rc" -ne 2 ]] || return 2
-      [[ "$rc" -eq 0 ]] || echo "$path"
+      [[ "$rc" -ne 1 ]] || echo "$cite"
     done
+}
+
+# Prose with fenced blocks and inline code removed, so code such as Promise<Feature> is not
+# mistaken for a template marker. No template marker sits inside backticks.
+prose_only() {
+  awk '/^[ \t]*(```|~~~)/ { fenced = !fenced; next } !fenced { gsub(/`[^`]*`/, ""); print }' "$1"
 }
 
 # Parse the actual Status column, not arbitrary cells containing the word planned.
@@ -180,7 +198,7 @@ structure_findings() {
     contained_path "$repo" "docs/$slug/feature-docs/$name" || return 2
     grep -q '^# .[^[:space:]]*' "$path" || echo "  INCOMPLETE  $name needs a title"
     # Only known template markers, not arbitrary angle-bracket syntax in real documentation.
-    if grep -Eq '<(Feature|YYYY-MM-DD|title|NN|one sentence|\.scratch/feature|source path|problem|solution|capability|path/file|notes|contracts|verification summary|scope exclusions|ticket links|decision|recorded reason|source>|Accepted,|criterion|ticket|what|blocked|status|date|material conflict)' "$path" ||
+    if prose_only "$path" | grep -Eq '<(Feature|YYYY-MM-DD|title|NN|one sentence|\.scratch/feature|source path|problem|solution|capability|path/file|notes|contracts|verification summary|scope exclusions|ticket links|decision|recorded reason|source>|Accepted,|criterion|ticket|what|blocked|status|date|material conflict)' ||
        grep -Eq '^(Who had the problem and what it was, from their side\.|What the feature does for that person, in one paragraph\.|What is tested, at which seam, and the command that runs it\.|Expand here only the decisions that took real debate:|- \[ \] …)' "$path"; then
       echo "  INCOMPLETE  $name contains unfinished template text"
     fi
@@ -232,9 +250,12 @@ structure_findings() {
 }
 
 # Rewrites docs/FEATURES.md from every feature's overview.md.
+# Written to a temp file and moved into place, so a symlinked FEATURES.md is replaced, not followed.
 write_index() { # $1 = repo
-  local repo="$1" dir name title summary updated
+  local repo="$1" dir name title summary updated tmp
   mkdir -p "$repo/docs"
+  contained_path "$repo" docs || die "cannot use docs/"
+  tmp="$(mktemp "$repo/docs/.FEATURES.md.XXXXXX")" || die "cannot write $INDEX"
   {
     echo "# Features"
     echo
@@ -250,9 +271,10 @@ write_index() { # $1 = repo
       summary="$(sed -n 's/^> Summary: *//p' "$dir/overview.md" | head -n 1)"
       case "$summary" in '<'*) summary="" ;; esac
       updated="$({ grep -oE 'Updated: [0-9]{4}-[0-9]{2}-[0-9]{2}' "$dir/overview.md" || true; } | head -n 1 | cut -d' ' -f2)"
-      echo "| [${title:-$name}]($name/feature-docs/overview.md) | ${summary//|/\\|} | $updated |"
+      title="${title:-$name}"
+      echo "| [${title//|/\\|}]($name/feature-docs/overview.md) | ${summary//|/\\|} | $updated |"
     done
-  } > "$repo/$INDEX"
+  } > "$tmp" && chmod 644 "$tmp" && mv -f "$tmp" "$repo/$INDEX" || { rm -f "$tmp"; die "cannot write $INDEX"; }
 }
 
 refresh_index() { if [[ -f "$1/$INDEX" ]]; then write_index "$1"; fi; }
@@ -264,8 +286,13 @@ cmd_new() {
   [[ -d "$TPL_DIR" ]] || die "templates not found: $TPL_DIR"
   dest="$repo/docs/$slug/feature-docs"
   title="$(echo "$slug" | tr '-' ' ' | awk '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) substr($i,2)}1')"
+  # Check each level before creating the next, so a symlink out of the repo gets nothing written.
+  mkdir -p "$repo/docs" && contained_path "$repo" docs || die "cannot use docs/"
+  if [[ -e "$repo/docs/$slug" || -L "$repo/docs/$slug" ]]; then contained_path "$repo" "docs/$slug" || die "cannot use docs/$slug"; fi
+  if [[ -e "$dest" || -L "$dest" ]]; then contained_path "$repo" "docs/$slug/feature-docs" || die "cannot use docs/$slug/feature-docs"; fi
   mkdir -p "$dest"
   for name in overview.md decisions.md tickets.md; do
+    [[ ! -L "$dest/$name" ]] || die "refusing to write through a symlink: docs/$slug/feature-docs/$name"
     if [[ -f "$dest/$name" ]]; then echo "skip     docs/$slug/feature-docs/$name (already exists)"; continue; fi
     sed -e "s/<Feature>/$title/g" -e "s/<YYYY-MM-DD>/$TODAY/g" "$TPL_DIR/$name" > "$dest/$name"
     echo "created  docs/$slug/feature-docs/$name"
@@ -294,7 +321,8 @@ cmd_stamp() {
       --source)
         [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || die "--source needs a directory"
         [[ "$source_set" -eq 0 ]] || die "--source may be supplied only once"
-        source="${2%/}"; safe_relative "$source"; source_set=1; shift 2 ;;
+        source="$2"; while [[ "$source" == ?*/ ]]; do source="${source%/}"; done
+        safe_relative "$source"; source_set=1; shift 2 ;;
       --evidence)
         [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || die "--evidence needs a file"
         safe_relative "$2"; evidence+=("$2"); selected=1; shift 2 ;;
@@ -510,7 +538,11 @@ scan() { # check|status, then CLI args
   else
     for dir in "$repo"/docs/*/feature-docs; do
       [[ -d "$dir" ]] || continue
-      found=1; name="$(basename "$(dirname "$dir")")"; check_slug "$name"
+      found=1; name="$(basename "$(dirname "$dir")")"
+      # One misnamed folder is an error, but the other features are still reported.
+      if [[ ! "$name" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+        echo "Error: feature must be kebab-case (e.g. csv-export): $name" >&2; result=2; continue
+      fi
       rc=0; report "$repo" "$name" "$quiet" "$mode" || rc=$?
       if [[ "$rc" -gt "$result" ]]; then result="$rc"; fi
       if [[ "$rc" -ne 2 && -f "$dir/sources.json" ]]; then
@@ -524,6 +556,7 @@ scan() { # check|status, then CLI args
         for dir in "$repo"/.scratch/*/; do
           [[ -d "$dir" ]] || continue
           src=".scratch/$(basename "$dir")"
+          [[ ! -d "$repo/docs/$(basename "$dir")/feature-docs" ]] || continue
           if ! printf '%s' "$sources" | grep -Fxq -- "$src"; then echo "$(basename "$dir")  NO DOCS  $src has no recorded source baseline"; fi
         done
       fi

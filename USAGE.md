@@ -76,7 +76,7 @@ Select files supporting documented claims: implementation, relevant tests, and c
 
 Later stamps reuse the recorded selection when `--evidence` is omitted. Supplying any `--evidence` arguments **replaces the entire selection**; include every file to retain. Files outside that set are not automatically monitored.
 
-Normal stamping hashes recursive `*.md` files under `.scratch/<feature>`, including maps and research answers. Use `--source planning/billing` for another source folder; later stamps remember it. Git metadata, generated `docs/*/feature-docs/` folders, and `docs/FEATURES.md` are excluded so a broad source folder cannot ingest its own output or snapshots.
+Normal stamping hashes recursive `*.md` files under `.scratch/<feature>`, including maps and research answers. Use `--source planning/billing` for another source folder; later stamps remember it. Git metadata, generated `docs/*/feature-docs/` folders, and `docs/FEATURES.md` are excluded so a broad source folder cannot ingest its own output or snapshots. Symlinked `.md` files and folders are not followed, so a source that lives elsewhere must be copied into the folder to be tracked.
 
 The version-2 `sources.json` separates source, document, and evidence hashes. Keep its generated canonical format: it is script-owned, not a file to edit or reformat. Malformed or unsupported manifests fail explicitly. Failed validation or baseline preparation preserves the previous manifest.
 

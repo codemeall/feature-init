@@ -130,7 +130,7 @@ A `--project` install writes `<repo>/.claude/skills/feature-docs`, `<repo>/.curs
 
 The package published as `feature-docs@2.0.0` accepts those install commands. It rejects `--uninstall` and `--remove-legacy`.
 
-Once published, 2.1.0 and later also accept `--uninstall` and `--remove-legacy` through npx (`npx feature-docs@latest --uninstall all`). 2.0.0 does not.
+2.1.0 and later also accept `--uninstall` and `--remove-legacy` through npx (`npx feature-docs@latest --uninstall all`). 2.0.0 does not.
 
 From a clone of this repository, with no Node:
 
@@ -251,7 +251,7 @@ Measured:
 
 Not measured:
 
-- Real-agent trigger precision and recall. See [issue #5](https://github.com/codemeall/feature-init/issues/5). A harness eval exists under `evals/harness/`, but it is unscored.
+- Real-agent trigger precision and recall. The harness eval under `evals/harness/` can measure them, but no scored run has been recorded.
 
 ## System requirements
 
