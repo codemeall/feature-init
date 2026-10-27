@@ -498,6 +498,69 @@ run 2 bash "$FD" >/dev/null
 run 0 bash "$FD" --help >/dev/null
 pass "bad paths and arguments are usage errors"
 
+EDGE="$TMP/edge"
+make_repo "$EDGE"
+EDGE_DOCS="$EDGE/docs/csv-export/feature-docs"
+cp "$EDGE_DOCS/overview.md" "$TMP/edge-overview"
+with_line() { { cat "$TMP/edge-overview"; printf '%s\n' "$1"; } > "$EDGE_DOCS/overview.md"; }
+mkdir -p "$TMP/edge-outside"; printf 'x\n' > "$TMP/edge-outside/x.js"; ln -s "$TMP/edge-outside" "$EDGE/vendor"
+for cite in './src/export.js' '../shared/util.js' 'src/./export.js' 'src/../src/export.js' 'vendor/x.js'; do
+  with_line "See \`$cite\`."
+  run 0 bash "$FD" check "$EDGE" csv-export >/dev/null
+done
+with_line 'See `./src/gone.js`.'
+out="$(run 1 bash "$FD" check "$EDGE" csv-export)"
+contains "$out" 'MISSING CITATION  ./src/gone.js'
+pass "citations with ./ or .. or an outside symlink are not operational errors"
+
+for line in '`getAll(): Promise<Feature[]>`' '`<datetime-picker>`' '`<status-badge>`' 'Renders `<title>` from the report name.' \
+  $'```ts\nconst rows: Array<Feature> = [];\n```'; do
+  with_line "$line"
+  run 0 bash "$FD" check "$EDGE" csv-export >/dev/null
+done
+with_line 'Owner: <Feature>'
+out="$(run 1 bash "$FD" check "$EDGE" csv-export)"
+contains "$out" 'unfinished template text'
+cp "$TMP/edge-overview" "$EDGE_DOCS/overview.md"
+pass "angle brackets in code are not template markers, and a leftover marker in prose still is"
+
+printf 'PRECIOUS\n' > "$TMP/precious.md"
+ln -s "$TMP/precious.md" "$EDGE/docs/FEATURES.md"
+run 0 bash "$FD" index "$EDGE" >/dev/null
+[[ "$(cat "$TMP/precious.md")" == PRECIOUS ]] || fail "index wrote through a symlink"
+[[ ! -L "$EDGE/docs/FEATURES.md" ]] || fail "index left the symlink in place"
+[[ -n "$(find "$EDGE/docs/FEATURES.md" -perm -044)" ]] || fail "index is not readable by others"
+contains "$(cat "$EDGE/docs/FEATURES.md")" '(csv-export/feature-docs/overview.md)'
+mkdir "$TMP/edge-slug"; ln -s "$TMP/edge-slug" "$EDGE/docs/other-feat"
+run 2 bash "$FD" new "$EDGE" other-feat >/dev/null
+[[ -z "$(ls -A "$TMP/edge-slug")" ]] || fail "new wrote outside the repo"
+rm "$EDGE/docs/other-feat"
+sed 's/^# Csv Export$/# Csv | Export/' "$TMP/edge-overview" > "$EDGE_DOCS/overview.md"
+run 0 bash "$FD" index "$EDGE" >/dev/null
+contains "$(cat "$EDGE/docs/FEATURES.md")" '[Csv \| Export]('
+cp "$TMP/edge-overview" "$EDGE_DOCS/overview.md"
+pass "index and new do not write through symlinks, and index escapes titles"
+
+out="$(bash "$FD" status "$EDGE" 2>&1 || true)"
+contains "$out" 'REVIEW REQUIRED'
+lacks "$out" 'NO DOCS'
+mkdir -p "$EDGE/.scratch/undocumented"; printf '# Idea\n' > "$EDGE/.scratch/undocumented/spec.md"
+contains "$(bash "$FD" status "$EDGE" 2>&1 || true)" 'undocumented  NO DOCS'
+rm -rf "$EDGE/.scratch/undocumented"
+run 0 stamp "$EDGE" >/dev/null
+echo 'A changed requirement.' >> "$EDGE/.scratch/csv-export/spec.md"
+mkdir -p "$EDGE/docs/Bad_Name/feature-docs"
+out="$(run 2 bash "$FD" status "$EDGE")"
+contains "$out" 'Bad_Name'
+contains "$out" 'DRIFT'
+rm -rf "$EDGE/docs/Bad_Name"
+pass "status reports NO DOCS only without docs, and one bad folder does not hide other features"
+
+run 0 bash "$FD" stamp "$EDGE" csv-export --source '.scratch/csv-export//' >/dev/null
+lacks "$(cat "$EDGE_DOCS/sources.json")" '//'
+run 0 bash "$FD" status "$EDGE" csv-export >/dev/null
+pass "--source accepts repeated trailing slashes"
+
 INSTALL_PROJECT="$TMP/install-project"
 mkdir -p "$INSTALL_PROJECT/.claude/skills/feature-init"
 out="$(run 0 bash "$ROOT/install.sh" claude --project "$INSTALL_PROJECT")"

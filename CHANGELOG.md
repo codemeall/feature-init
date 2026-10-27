@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-10-27, 2.1.1: script fixes
+
+Bug fixes only, so the version is 2.1.1.
+
+- Fix: a backticked citation in `overview.md` such as `./src/x.js`, `../shared/util.js`, or a path through a symlink that leaves the repo no longer makes `check`, `status`, and `stamp` exit 2. A leading `./` is dropped and the file is checked. Paths with `..` and paths outside the repo are skipped. A missing file is still reported as `MISSING CITATION` with its original spelling.
+- Fix: angle brackets inside inline code or fenced blocks, such as `Promise<Feature[]>` or `<status-badge>`, are no longer reported as unfinished template text. A leftover marker in prose still is.
+- Fix: `index`, and the index refresh after `new` and `stamp`, replace a symlinked `docs/FEATURES.md` instead of writing through it. `new` refuses a feature folder that resolves outside the repo before writing anything, and refuses to write a template through a symlink.
+- Fix: `index` escapes `|` in feature titles, as it already did in summaries.
+- Fix: a folder under `docs/` that is not kebab-case is reported as an error (exit 2) without stopping `status` or `check` from reporting the other features.
+- Fix: `status` prints `NO DOCS` only for a `.scratch/<feature>` folder whose feature has no `docs/<feature>/feature-docs/` folder.
+- Fix: `--source` accepts repeated trailing slashes. Before, `--source dir//` failed with advice to delete a valid `sources.json`.
+- Docs: USAGE states that symlinked source files and folders are not followed.
+- Docs: README no longer says 2.1.0 is unpublished.
+- Harness: the control arm runs first and its workspace is removed before the skill is installed for the other arm, so a control agent can no longer read the other arm's `SKILL.md`. A directory listing or a read of a different skill no longer counts as a load. Temp directories left by an agent that ignores SIGTERM are removed after a timeout or early stop.
+- Harness: the Cursor runner's `probe` requires the login file that `run` copies, or `CURSOR_API_KEY`. On macOS the CLI login is in the Keychain, so `status` passed while every run failed.
+- Note: real-agent trigger precision and recall are still not measured. The harness can measure them; no scored run is recorded.
+
 ## 2026-10-26, 2.1.0: publish with provenance
 
 2.0.0 was published without npm provenance. 2.1.0 is the first release published from GitHub Actions with provenance. 2.0.0 declared Node >=16. This release requires Node >=20 and adds installer flags, so the version is 2.1.0.
