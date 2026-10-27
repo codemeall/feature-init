@@ -6,7 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { test } = require("node:test");
-const { earlyStopReason } = require("../evals/harness/trace.js");
+const { earlyStopReason, readTrace } = require("../evals/harness/trace.js");
 
 const root = path.resolve(__dirname, "..");
 const harness = path.join(root, "evals/harness");
@@ -14,6 +14,18 @@ function workspace(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "harness-regression-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
+}
+function assertNoCleanupMarkers(dir) {
+  const found = [];
+  const walk = (current) => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith(".cleanup")) found.push(full);
+    }
+  };
+  walk(dir);
+  assert.deepEqual(found, []);
 }
 function loaded(file, skillDir, flags = []) {
   return spawnSync(process.execPath, [path.join(harness, "trace.js"), "skill-loaded",
@@ -182,6 +194,33 @@ test("Cursor rejects unrelated programs named agent", (t) => {
   }
 });
 
+test("Cursor probe needs the same login that run copies, not only a passing status", (t) => {
+  const dir = workspace(t);
+  const bin = path.join(dir, "bin");
+  const home = path.join(dir, "home");
+  fs.mkdirSync(bin);
+  fs.mkdirSync(home);
+  // status passes, as it does on macOS when the login is in the Keychain.
+  fs.writeFileSync(path.join(bin, "cursor-agent"), "#!/bin/bash\n[[ \"$1\" == status ]] && { echo 'Logged in'; exit 0; }\nexit 1\n", { mode: 0o755 });
+  const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, HOME: home };
+  delete env.CURSOR_API_KEY;
+  delete env.XDG_CONFIG_HOME;
+  const probe = (extra = {}) => spawnSync("/bin/bash", [path.join(harness, "runners/cursor.sh"), "probe"],
+    { encoding: "utf8", env: { ...env, ...extra } });
+
+  let result = probe();
+  assert.equal(result.status, 3, result.stdout + result.stderr);
+  assert.match(result.stdout, /CURSOR_API_KEY/);
+
+  result = probe({ CURSOR_API_KEY: "fixture-only" });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+
+  fs.mkdirSync(path.join(home, ".config/cursor"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".config/cursor/auth.json"), "{}", { mode: 0o600 });
+  result = probe();
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+
 for (const contaminated of [false, true]) {
 test(`relative output paths work through the Claude runner (contaminated=${contaminated})`, (t) => {
   const dir = workspace(t);
@@ -218,6 +257,7 @@ console.log(JSON.stringify({type:"result",subtype:"success"}));
   }
   assert.equal(report.prompts, 24);
   assert.equal(fs.readdirSync(path.join(dir, "relative results/traces")).filter((f) => f.endsWith(".jsonl")).length, 48);
+  assertNoCleanupMarkers(path.join(dir, "relative results"));
 });
 }
 
@@ -238,6 +278,7 @@ const probe = {
   auth_entries: fs.existsSync(path.join(home, ".config/cursor")) ? fs.readdirSync(path.join(home, ".config/cursor")) : [],
   home_entries: fs.readdirSync(home).sort(),
   cwd_entries: fs.readdirSync(process.cwd()).sort(),
+  readme: fs.readFileSync(path.join(ws, "README.md"), "utf8"),
 };
 if (process.env.PROBE_LOG) fs.appendFileSync(process.env.PROBE_LOG, JSON.stringify(probe) + "\\n");
 const skill = path.join(ws, ".cursor/skills/feature-docs/SKILL.md");
@@ -258,6 +299,20 @@ else if (mode === "load-then-hang") {
   say({type:"tool_call",subtype:"started",tool_call:{readToolCall:{args:{path:"/other/project/.cursor/skills/feature-docs/SKILL.md"}}}});
   for (let i = 0; i < 6; i++) say({type:"tool_call",subtype:"started",tool_call:{lsToolCall:{args:{path:ws}}}});
   setInterval(() => {}, 1000);
+} else if (mode === "sibling-search") {
+  const parent = path.dirname(ws);
+  let found = "";
+  for (const name of fs.readdirSync(parent)) {
+    const candidate = path.join(parent, name, ".cursor", "skills", "feature-docs", "SKILL.md");
+    if (fs.existsSync(candidate)) found = candidate;
+  }
+  say({type:"tool_call",subtype:"started",tool_call:{readToolCall:{args:{path:found || path.join(ws, "README.md")}}}});
+  say({type:"result",subtype:"success",usage:{inputTokens:1,outputTokens:1}});
+} else if (mode === "other-skill") {
+  say({type:"tool_call",subtype:"started",tool_call:{readToolCall:{args:{path:path.join(home, ".cursor/plugins/cache/example/writing-for-agents/SKILL.md")}}}});
+  say({type:"tool_call",subtype:"started",tool_call:{globToolCall:{args:{targetDirectory:path.join(home, ".cursor"), globPattern:"**/*"}}}});
+  say({type:"tool_call",subtype:"started",tool_call:{skillToolCall:{args:{name:"writing-for-agents"}}}});
+  say({type:"result",subtype:"success",usage:{inputTokens:1,outputTokens:1}});
 } else {
   if (fs.existsSync(skill)) say({type:"tool_call",subtype:"started",tool_call:{readToolCall:{args:{path:skill}}}});
   say({type:"result",subtype:"success",usage:{inputTokens:10,outputTokens:2}});
@@ -347,6 +402,7 @@ test("Cursor runs use an isolated HOME, an empty workspace, only the auth file, 
   assert.doesNotMatch(summary, /^Precision: [0-9]/m);
   assert.doesNotMatch(summary, /^Recall: [0-9]/m);
   assert.deepEqual(report.results.map((r) => r.expected), ["trigger", "near_miss"]);
+  assertNoCleanupMarkers(path.join(dir, "out"));
 });
 
 test("HARNESS_MODEL is the model fallback", (t) => {
@@ -390,6 +446,7 @@ test("early stop ends a run at the first skill load, and after N tool calls with
     assert.equal(trigger.early_stop_with, loaded ? "skill_loaded" : "tool_limit");
     assert.equal(result.status, 0, result.stderr);
     assertHomesRemoved(env.PROBE_LOG);
+    assertNoCleanupMarkers(path.join(dir, "out"));
   }
 });
 
@@ -473,6 +530,147 @@ test("harness early stop uses the same install the scorer uses", (t) => {
   assert.equal(report.stop_after_tools, 4);
   assert.equal(result.status, 2, result.stderr);
 });
+
+test("cleanup refuses a marker that escapes through .. and a symlink parent", (t) => {
+  const dir = workspace(t);
+  const trace = path.join(dir, "trace.jsonl");
+  fs.writeFileSync(trace, "");
+  const marker = `${trace}.cleanup`;
+  const lexical = fs.mkdtempSync(path.join(os.tmpdir(), "harness-claude."));
+  const secretParent = path.join(dir, "secret");
+  const secretChild = path.join(secretParent, "child");
+  fs.mkdirSync(secretChild, { recursive: true });
+  const kernelVictim = path.join(secretParent, path.basename(lexical));
+  fs.mkdirSync(kernelVictim);
+  fs.writeFileSync(path.join(lexical, "keep.txt"), "lexical");
+  fs.writeFileSync(path.join(kernelVictim, "keep.txt"), "kernel");
+  const link = `${lexical}lnk`;
+  fs.symlinkSync(secretChild, link);
+  t.after(() => {
+    fs.rmSync(link, { force: true });
+    fs.rmSync(lexical, { recursive: true, force: true });
+  });
+  fs.writeFileSync(marker, `${link}/../${path.basename(lexical)}\n`);
+  // --trace after `node -e` is a V8 flag. It prints more than spawnSync's
+  // default 1 MB buffer, and the overflow kills timeout.js with SIGTERM.
+  // A script file keeps --trace as a script argument, which is how timeout.js
+  // finds the marker. maxBuffer stays large if that flag regresses.
+  const script = path.join(dir, "exit0.js");
+  fs.writeFileSync(script, "process.exit(0);\n");
+  const result = spawnSync(process.execPath, [path.join(harness, "timeout.js"), "5", process.execPath, script, "--trace", trace], {
+    encoding: "utf8",
+    maxBuffer: 8 * 1024 * 1024,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /refusing to remove unexpected harness temp path/);
+  assert.equal(fs.existsSync(path.join(lexical, "keep.txt")), true, "lexical temp dir was removed");
+  assert.equal(fs.existsSync(path.join(kernelVictim, "keep.txt")), true, "symlink .. target was removed");
+  assert.equal(fs.existsSync(marker), true, "refused cleanup removed the marker");
+  assert.equal(fs.existsSync(link), true, "symlink parent was removed");
+});
+
+test("detector ignores temp paths, other skills, and directory listings", () => {
+  const skillDir = "/tmp/harness-eval.example/ws.ctrl/.cursor/skills/feature-docs";
+  const installed = "/tmp/harness-eval.example/ws.treat/.cursor/skills/feature-docs";
+  const cases = [
+    ["cursor-control-search.jsonl", 1],
+    ["cursor-other-skill.jsonl", 1],
+    ["cursor-skill-listing.jsonl", 1],
+    ["cursor-sibling-skill-read.jsonl", 0],
+  ];
+  for (const [name, status] of cases) {
+    const file = path.join(harness, "testdata", name);
+    const result = loaded(file, skillDir, ["--any-install"]);
+    assert.equal(result.status, status, `${name}: ${result.stderr}`);
+    const events = readTrace(file).events;
+    const reason = earlyStopReason(events, "feature-docs", 6, { anyInstall: true, skillDir });
+    assert.equal(reason === "skill_loaded", status === 0, name);
+  }
+  const sibling = path.join(harness, "testdata/cursor-sibling-skill-read.jsonl");
+  assert.equal(loaded(sibling, skillDir).status, 1, "a sibling install is not the selected install");
+  assert.equal(loaded(sibling, installed).status, 0, "a read of the selected SKILL.md is a load");
+  const oldNames = fs.readFileSync(path.join(harness, "testdata/cursor-control-search.jsonl"), "utf8");
+  assert.match(oldNames, /feature-docs-harness/);
+  assert.match(oldNames, /feature-docs-cursor-home/);
+});
+
+test("a control run cannot see the skill installed for the other arm", (t) => {
+  const { dir, env } = fakeCursorEnv(t, { FAKE_MODE: "sibling-search" });
+  const result = runHarness(dir, env, ["--timeout", "30", "--max-prompts", "2", "--stop-after-tools", "4"]);
+  const report = JSON.parse(fs.readFileSync(path.join(dir, "out/results.json"), "utf8"));
+  assert.equal(report.status, "smoke", result.stderr);
+  assert.equal(result.status, 0, result.stderr);
+  const probes = fs.readFileSync(env.PROBE_LOG, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  assert.equal(probes.length, 4);
+  for (const probe of probes) {
+    assert.equal(probe.cwd.includes("feature-docs"), false, probe.cwd);
+    assert.equal(probe.home.includes("feature-docs"), false, probe.home);
+    assert.equal(probe.readme.includes("feature-docs"), false, probe.readme);
+  }
+  for (const row of report.results) {
+    assert.equal(row.loaded_with_skill, true, row.prompt);
+    assert.equal(row.loaded_without_skill, false, row.prompt);
+  }
+});
+
+test("reading another skill does not contaminate the control arm", (t) => {
+  const { dir, env } = fakeCursorEnv(t, { FAKE_MODE: "other-skill" });
+  const result = runHarness(dir, env, ["--timeout", "30", "--max-prompts", "2", "--stop-after-tools", "4"]);
+  const report = JSON.parse(fs.readFileSync(path.join(dir, "out/results.json"), "utf8"));
+  assert.equal(report.status, "smoke", result.stderr);
+  assert.notEqual(report.status, "contaminated");
+  assert.equal(result.status, 0, result.stderr);
+  for (const row of report.results) {
+    assert.equal(row.loaded_with_skill, false, row.prompt);
+    assert.equal(row.loaded_without_skill, false, row.prompt);
+    assert.notEqual(row.early_stop_with, "skill_loaded");
+    assert.notEqual(row.early_stop_without, "skill_loaded");
+  }
+});
+
+for (const runner of ["claude", "cursor"]) {
+  test(`${runner} removes the temp home when the agent keeps writing until kill`, (t) => {
+    const dir = workspace(t);
+    const bin = path.join(dir, "bin");
+    fs.mkdirSync(bin);
+    const record = path.join(dir, "home-path");
+    let recorded = "";
+    t.after(() => {
+      if (recorded) fs.rmSync(recorded, { recursive: true, force: true });
+    });
+    fs.writeFileSync(path.join(bin, runner === "claude" ? "claude" : "cursor-agent"), `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const home = process.env.HOME;
+fs.writeFileSync(process.env.CLEANUP_RECORD, home);
+const cache = path.join(home, ".cursor/plugins/cache");
+const write = () => {
+  fs.mkdirSync(cache, { recursive: true });
+  fs.writeFileSync(path.join(cache, "keep.txt"), "cache");
+};
+write();
+process.on("SIGTERM", () => {});
+setInterval(write, 50);
+`, { mode: 0o755 });
+    const result = spawnSync("/bin/bash", ["-c", 'source "$1"; run_with_timeout 2 bash "$2" run --cwd "$3" --trace "$4" --prompt test',
+      "test", path.join(harness, "lib.sh"), path.join(harness, "runners", `${runner}.sh`), dir, path.join(dir, "trace.jsonl")], {
+      encoding: "utf8", timeout: 10000,
+      // A trailing slash is what GitHub macOS runners set. mktemp then emits
+      // a doubled slash unless the runner canonicalizes the path first.
+      env: { ...process.env, TMPDIR: `${os.tmpdir()}${path.sep}`, PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+        CLEANUP_RECORD: record, ANTHROPIC_API_KEY: "fixture-only", CURSOR_API_KEY: "fixture-only" },
+    });
+    assert.equal(result.status, 124, result.stderr);
+    assert.equal(fs.existsSync(record), true, "stub CLI did not start");
+    recorded = fs.readFileSync(record, "utf8");
+    assert.equal(recorded.includes("//"), false, `temp path was not canonical: ${recorded}`);
+    assert.equal(recorded.includes("\\"), false, `temp path was not canonical: ${recorded}`);
+    assert.equal(recorded, path.resolve(recorded), recorded);
+    assert.equal(fs.existsSync(recorded), false, `temporary home survived: ${recorded}`);
+    assert.equal(fs.existsSync(path.join(recorded, ".cursor/plugins/cache/keep.txt")), false);
+    assert.equal(fs.existsSync(path.join(dir, "trace.jsonl.cleanup")), false, "cleanup marker survived the kill");
+  });
+}
 
 test("a full run that clears the floor and both classes still reports rates", (t) => {
   const rows = [

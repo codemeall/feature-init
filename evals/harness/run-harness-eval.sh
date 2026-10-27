@@ -26,11 +26,13 @@ Usage: $0 [--runner <name-or-path>] [--out <dir>] [--model <name>] [--timeout <s
           [--stop-after-tools <n>] [--max-prompts <n>] [--min-scored <fraction>]
 
 Runs every prompt in evals/triggers.json twice:
-  with the feature-docs skill installed in a temporary project
-  without that skill
+  without the feature-docs skill
+  then with that skill installed in a temporary project
 
-Precision and recall use the CLI trace. A load is a Skill tool call, or a
-read of the installed SKILL.md. Reply text does not count.
+Precision and recall use the CLI trace. A load is a Skill tool call named
+feature-docs, or a read of that skill's installed SKILL.md. A directory
+listing, a read of a different skill, and a path that only contains the
+name do not count. Reply text does not count.
 
   --runner NAME    claude, cursor, or a path to a custom runner
   --out DIR        results.json, summary.md, and traces (default: evals/harness/out/<time>)
@@ -177,7 +179,8 @@ esac
 
 # Workspaces live in their own temporary root. Prompts stay in memory, so no
 # eval file (triggers.json, prompt lists, harness scripts) sits near the agent.
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/feature-docs-harness.XXXXXX")"
+# The directory name omits the skill name so the path does not advertise it.
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/harness-eval.XXXXXX")"
 WORK="$(cd "$WORK" && pwd -P)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -187,9 +190,12 @@ make_workspace() {
   dir="$(mktemp -d "$WORK/ws.XXXXXX")"
   dir="$(cd "$dir" && pwd -P)"
   git init -q "$dir"
-  printf 'A temporary workspace for a trigger eval. It is not the feature-docs repository.\n' > "$dir/README.md"
+  printf 'Temporary workspace.\n' > "$dir/README.md"
   printf '%s\n' "$dir"
 }
+# The control arm has no install. Scoring it against a path that is not on
+# disk keeps an exact path match from pointing at the with-skill copy.
+CONTROL_SKILL_DIR="/var/empty/harness-skill-not-installed"
 skill_dir_for() {
   case "$agent" in
     claude) printf '%s\n' "$1/.claude/skills/feature-docs" ;;
@@ -278,18 +284,24 @@ for row in "${PROMPTS[@]}"; do
   with_trace="$OUT/traces/$(printf '%02d' "$index")-with.jsonl"
   without_trace="$OUT/traces/$(printf '%02d' "$index")-without.jsonl"
   echo "prompt $index of ${#PROMPTS[@]} ($expected)" >&2
-  with_dir="$(make_workspace)"
-  without_dir="$(make_workspace)"
-  bash "$INSTALL" "$agent" --project "$with_dir" >/dev/null
-  skill_dir="$(skill_dir_for "$with_dir")"
-  [[ -f "$skill_dir/SKILL.md" ]] || fail_run "install did not create $skill_dir/SKILL.md"
-
+  # Control runs before the skill exists on disk. Creating both workspaces
+  # first let the control agent list the shared parent and read the other
+  # arm's SKILL.md, which scored as a load.
   reason=""
-  status_with="$(run_arm "$with_dir" "$with_trace" "$prompt" 0 "$skill_dir")"
-  [[ "$status_with" == ok ]] || reason="with-skill ${status_with#skip:}"
+  without_dir="$(make_workspace)"
+  status_without="$(run_arm "$without_dir" "$without_trace" "$prompt" 1 "$CONTROL_SKILL_DIR")"
+  [[ "$status_without" == ok ]] || reason="without-skill ${status_without#skip:}"
+  rm -rf "$without_dir"
+
+  skill_dir="$CONTROL_SKILL_DIR"
   if [[ -z "$reason" ]]; then
-    status_without="$(run_arm "$without_dir" "$without_trace" "$prompt" 1 "$skill_dir")"
-    [[ "$status_without" == ok ]] || reason="without-skill ${status_without#skip:}"
+    with_dir="$(make_workspace)"
+    bash "$INSTALL" "$agent" --project "$with_dir" >/dev/null
+    skill_dir="$(skill_dir_for "$with_dir")"
+    [[ -f "$skill_dir/SKILL.md" ]] || fail_run "install did not create $skill_dir/SKILL.md"
+    status_with="$(run_arm "$with_dir" "$with_trace" "$prompt" 0 "$skill_dir")"
+    [[ "$status_with" == ok ]] || reason="with-skill ${status_with#skip:}"
+    rm -rf "$with_dir"
   fi
   loaded_with=0
   loaded_without=0
@@ -298,13 +310,12 @@ for row in "${PROMPTS[@]}"; do
     [[ "$loaded_with" != skip:* ]] || reason="with-skill ${loaded_with#skip:}"
   fi
   if [[ -z "$reason" ]]; then
-    loaded_without="$(loaded_flag --trace "$without_trace" --skill feature-docs --skill-dir "$skill_dir" --any-install)"
+    loaded_without="$(loaded_flag --trace "$without_trace" --skill feature-docs --skill-dir "$CONTROL_SKILL_DIR" --any-install)"
     [[ "$loaded_without" != skip:* ]] || reason="without-skill ${loaded_without#skip:}"
   fi
   [[ -z "$reason" ]] || echo "  skipped: $reason" >&2
   meta_with="$( [[ -f "$with_trace" ]] && node "$TRACE_JS" meta --trace "$with_trace" 2>/dev/null || echo '{}')"
   meta_without="$( [[ -f "$without_trace" ]] && node "$TRACE_JS" meta --trace "$without_trace" 2>/dev/null || echo '{}')"
-  rm -rf "$with_dir" "$without_dir"
   node -e '
 const fs = require("node:fs");
 const [prompt, expected, lw, lwo, tw, two, reason, mw, mwo, file] = process.argv.slice(1);

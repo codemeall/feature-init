@@ -66,11 +66,16 @@ run_cmd() (
     echo "run needs --cwd, --trace, and --prompt" >&2
     exit 2
   }
-  local work env_file rc=0
-  work="$(mktemp -d "${TMPDIR:-/tmp}/feature-docs-claude.XXXXXX")"
+  local work env_file rc=0 cleanup_file
+  work="$(mktemp -d "${TMPDIR:-/tmp}/harness-claude.XXXXXX")"
+  work="$(canonical_path "$work")"
+  cleanup_file="$trace.cleanup"
+  # EXIT removes the work dir. The marker stays so the supervisor can remove
+  # it again after a kill, once the agent can no longer recreate it.
   trap 'rm -rf "$work"' EXIT
   trap 'exit 143' TERM
   trap 'exit 130' INT
+  printf '%s\n' "$work" > "$cleanup_file"
   env_file="$work/env"
   claude_env "$work" > "$env_file"
   local -a env_args=()
@@ -94,6 +99,8 @@ run_cmd() (
     < /dev/null >"$trace" 2>"$trace.stderr" &
   # wait is interruptible, so TERM can clean up even if the CLI ignores it.
   wait "$!" || rc=$?
+  rm -rf "$work"
+  rm -f "$cleanup_file"
   return "$rc"
 )
 

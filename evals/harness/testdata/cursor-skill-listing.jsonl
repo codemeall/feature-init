@@ -1,0 +1,4 @@
+{"type":"tool_call","subtype":"started","tool_call":{"globToolCall":{"args":{"targetDirectory":"/tmp/harness-eval.example","globPattern":"**/*"}}}}
+{"type":"tool_call","subtype":"completed","tool_call":{"globToolCall":{"args":{"targetDirectory":"/tmp/harness-eval.example","globPattern":"**/*"},"result":{"success":{"path":"/tmp/harness-eval.example","files":["ws.treat/.cursor/skills/feature-docs/SKILL.md","/tmp/harness-eval.example/ws.treat/.cursor/skills/feature-docs/SKILL.md","ws.ctrl/README.md"]}}}}}
+{"type":"tool_call","subtype":"started","tool_call":{"lsToolCall":{"args":{"path":"/tmp/harness-cursor-home.example/.cursor"}}}}
+{"type":"result","subtype":"success"}

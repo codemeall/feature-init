@@ -34,6 +34,14 @@ probe() {
     echo "ready: cursor agent CLI with CURSOR_API_KEY"
     exit 0
   fi
+  # run starts the CLI with an empty HOME and carries over only this file.
+  # On macOS the CLI keeps its login in the Keychain, so status can pass
+  # while every run would still fail. Check the file run needs.
+  local auth="${XDG_CONFIG_HOME:-$HOME/.config}/cursor/auth.json"
+  if [[ ! -f "$auth" ]]; then
+    echo "cursor login is not in $auth, which run copies; set CURSOR_API_KEY (on macOS the CLI login is in the Keychain)"
+    exit 3
+  fi
   local rc=0
   run_with_timeout 20 "$bin" status >/dev/null 2>&1 || rc=$?
   if [[ "$rc" -eq 0 ]]; then
@@ -69,11 +77,16 @@ run_cmd() (
   # installed globally (~/.cursor/plugins, ~/.cursor/skills-cursor) are not
   # visible. The only file carried over is the CLI login, auth.json, copied
   # with mode 0600 and removed with the HOME when the run ends.
-  local home
-  home="$(mktemp -d "${TMPDIR:-/tmp}/feature-docs-cursor-home.XXXXXX")"
+  local home cleanup_file
+  home="$(mktemp -d "${TMPDIR:-/tmp}/harness-cursor-home.XXXXXX")"
+  home="$(canonical_path "$home")"
+  cleanup_file="$trace.cleanup"
+  # EXIT removes the HOME. The marker stays so the supervisor can remove the
+  # directory again after a kill, once the agent can no longer recreate it.
   trap 'rm -rf "$home"' EXIT
   trap 'exit 143' TERM
   trap 'exit 130' INT
+  printf '%s\n' "$home" > "$cleanup_file"
   mkdir -p "$home/.config/cursor"
   if [[ -z "${CURSOR_API_KEY:-}" ]]; then
     local auth="${XDG_CONFIG_HOME:-$HOME/.config}/cursor/auth.json"
@@ -86,6 +99,8 @@ run_cmd() (
   # CURSOR_API_KEY, when set, stays in the environment and is not printed.
   (cd "$cwd" && exec env -u XDG_CONFIG_HOME HOME="$home" TMPDIR="$home" "$bin" "${args[@]}") < /dev/null >"$trace" 2>"$trace.stderr" &
   wait "$!" || rc=$?
+  rm -rf "$home"
+  rm -f "$cleanup_file"
   return "$rc"
 )
 
