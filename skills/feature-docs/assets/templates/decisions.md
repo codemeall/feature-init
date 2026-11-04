@@ -1,11 +1,18 @@
 # <Feature> — Decisions
 
 > Status: Accepted (recorded agreement), Proposed (unaccepted option), Observed (implementation without recorded agreement), or Superseded by Dn.
-> Keep significant choices and unresolved conflicts. Use Not recorded for missing rationale and Unknown for missing historical dates. Source names the originating record and section/comment where available.
+> The table is the index; each decision has a section below. Superseded decisions stay.
 
-| # | Decision | Why (alternative rejected) | Source | Status | Date |
-|---|---|---|---|---|---|
-| D1 | <decision> | <recorded reason or Not recorded> | <source> | <Accepted, Proposed or Observed> | <YYYY-MM-DD or Unknown> |
+| # | Decision | Status | Date |
+|---|---|---|---|
+| D1 | <one-line decision> | <Accepted, Proposed or Observed> | <YYYY-MM-DD or Unknown> |
+
+## D1 — <short title>
+
+**Decision:** <what was chosen>
+**Why:** <recorded reason or Not recorded>
+**Rejected:** <alternative and why, or None recorded>
+**Agreed by:** <who agreed, and where to read more if that record is in git>
 
 ## Contested decisions
 

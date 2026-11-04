@@ -223,6 +223,103 @@ for state in partial planned; do
 done
 pass "partial and planned work do not fail freshness"
 
+# Readable records: decision index plus sections, a folder README, and no pointers to local-only files.
+READABLE="$TMP/readable"
+make_repo "$READABLE"
+rd="$READABLE/docs/csv-export/feature-docs"
+cat > "$rd/decisions.md" <<'DOC'
+# Csv Export — Decisions
+| # | Decision | Status | Date |
+|---|---|---|---|
+| D1 | Export as CSV | Superseded by D2 | 2026-10-01 |
+| D2 | Export as CSV with a header row | Accepted | 2026-10-02 |
+
+## D1 — CSV format
+**Decision:** Export as CSV.
+**Why:** Analysts already use spreadsheets.
+
+## D2 — Header row
+**Decision:** Add a header row.
+**Why:** Recipients could not tell the columns apart.
+DOC
+run 0 bash "$FD" check "$READABLE" csv-export >/dev/null
+sed -i.bak 's/Superseded by D2/Superseded by D9/' "$rd/decisions.md"
+run 1 bash "$FD" check "$READABLE" csv-export >/dev/null
+mv "$rd/decisions.md.bak" "$rd/decisions.md"
+pass "the decision index table with per-decision sections passes check and keeps supersession checks"
+
+out="$(run 0 bash "$FD" new "$READABLE" csv-export)"
+contains "$out" "created  docs/csv-export/feature-docs/README.md"
+contains "$(cat "$rd/README.md")" "# Csv Export: feature docs"
+contains "$(cat "$rd/README.md")" "sources.json"
+run 0 bash "$FD" check "$READABLE" csv-export >/dev/null
+pass "new adds a folder README that explains each file, without disturbing existing docs"
+
+cp "$rd/tickets.md" "$TMP/readable-tickets"
+echo '- [x] Copy checked; see .scratch/csv-export/owner-steps.md and `.fleet/runs/build/evidence.md`.' >> "$rd/tickets.md"
+out="$(run 1 bash "$FD" check "$READABLE" csv-export)"
+contains "$out" "LOCAL-ONLY  tickets.md: .scratch/csv-export/owner-steps.md"
+contains "$out" "LOCAL-ONLY  tickets.md: .fleet/runs/build/evidence.md"
+cp "$TMP/readable-tickets" "$rd/tickets.md"
+mkdir -p "$READABLE/notes"
+echo 'private' > "$READABLE/notes/private.md"
+echo 'notes/' > "$READABLE/.gitignore"
+echo 'Measured in `notes/private.md`; the contract is in `src/export.js`.' >> "$rd/tickets.md"
+out="$(run 1 bash "$FD" check "$READABLE" csv-export)"
+contains "$out" "LOCAL-ONLY  tickets.md: notes/private.md"
+lacks "$out" "src/export.js"
+cp "$TMP/readable-tickets" "$rd/tickets.md"
+echo 'Owner steps are in `.scratch/csv-export/spec.md`.' >> "$rd/tickets.md"
+run 1 bash "$FD" check "$READABLE" csv-export >/dev/null
+git -C "$READABLE" add .scratch/csv-export/spec.md
+run 0 bash "$FD" check "$READABLE" csv-export >/dev/null
+cp "$TMP/readable-tickets" "$rd/tickets.md"
+mkdir -p "$READABLE/vendor/lib"
+git -C "$READABLE/vendor/lib" init -q
+echo 'export {};' > "$READABLE/vendor/lib/index.js"
+echo 'node_modules/' >> "$READABLE/.gitignore"
+{ echo 'Shared code in `vendor/lib/index.js`; types checked with `./node_modules/.bin/tsc`.'
+  echo 'Measured in `notes/private.md`.'; } >> "$rd/tickets.md"
+out="$(run 1 bash "$FD" check "$READABLE" csv-export)"
+contains "$out" "LOCAL-ONLY  tickets.md: notes/private.md"
+lacks "$out" "vendor/lib"
+lacks "$out" "node_modules"
+cp "$TMP/readable-tickets" "$rd/tickets.md"
+pass "check reports untracked .scratch and .fleet pointers and git-ignored paths, but not tracked files"
+pass "a path inside a nested repository or a node_modules command does not break or trip the local-only check"
+
+# A registered submodule answers for its own ignore rules; root files and tracked paths with spaces.
+SUBSRC="$TMP/submodule-source"
+git init -q "$SUBSRC"
+echo 'benchmark.json' > "$SUBSRC/.gitignore"
+echo 'export {};' > "$SUBSRC/a.js"
+git -C "$SUBSRC" add -A
+git -C "$SUBSRC" -c user.email=test@example.com -c user.name=test commit -qm init
+git -C "$READABLE" -c protocol.file.allow=always submodule add -q "$SUBSRC" mods/lib 2>/dev/null
+echo '{}' > "$READABLE/mods/lib/benchmark.json"
+echo 'results.json' >> "$READABLE/.gitignore"
+echo '{}' > "$READABLE/results.json"
+{ echo 'Measured in `results.json` and `mods/lib/benchmark.json`; code in `mods/lib/a.js` and `package.json`.'
+  echo 'Owner steps: `.scratch/csv-export/owner notes.md`.'; } >> "$rd/tickets.md"
+echo n > "$READABLE/.scratch/csv-export/owner notes.md"
+git -C "$READABLE" add ".scratch/csv-export/owner notes.md"
+out="$(run 1 bash "$FD" check "$READABLE" csv-export)"
+contains "$out" "LOCAL-ONLY  tickets.md: results.json"
+contains "$out" "LOCAL-ONLY  tickets.md: mods/lib/benchmark.json"
+lacks "$out" "mods/lib/a.js"
+lacks "$out" "package.json"
+lacks "$out" "owner"
+cp "$TMP/readable-tickets" "$rd/tickets.md"
+out="$(run 2 bash "$FD" stamp "$READABLE" csv-export --evidence src/export.js --evidence mods/lib/benchmark.json)"
+contains "$out" "evidence is ignored by git"
+pass "ignored files at the root and inside a submodule are local-only, and a tracked path with spaces is not"
+
+out="$(run 2 bash "$FD" stamp "$READABLE" csv-export --evidence src/export.js --evidence notes/private.md)"
+contains "$out" "evidence is ignored by git"
+[[ ! -e "$rd/sources.json" ]] || fail "stamp with ignored evidence wrote a baseline"
+run 0 stamp "$READABLE" >/dev/null
+pass "stamp refuses evidence that git ignores"
+
 CLONE="$TMP/fresh clone"
 mkdir -p "$CLONE"
 cp -R "$REPO/docs" "$REPO/src" "$REPO/tests" "$CLONE/"

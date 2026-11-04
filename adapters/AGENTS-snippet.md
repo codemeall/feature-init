@@ -13,8 +13,10 @@ it does not exist). **Replace `<clone-path>` with where you cloned feature-init*
 ## Feature docs
 
 Specs and tickets for this repo live in `.scratch/<feature>/`, which is local and untracked.
-The tracked record of each built feature is `docs/<feature>/feature-docs/` (overview.md,
-decisions.md, tickets.md, sources.json). To write, convert or sync feature docs, read and follow:
+The tracked record of each built feature is `docs/<feature>/feature-docs/` (README.md,
+overview.md with the feature's glossary, decisions.md, tickets.md, and the script-owned
+sources.json). The docs never point into `.scratch/`. To write, convert or sync feature docs,
+read and follow:
 
     <clone-path>/skills/feature-docs/SKILL.md
 

@@ -52,11 +52,11 @@ Paths are relative to the target repository unless stated otherwise. `<feature>`
 
 ### `new <repo> <feature>`
 
-Create three templates in `docs/<feature>/feature-docs/`. Existing files are preserved. A new scaffold is incomplete: fill it before stamping.
+Create `README.md` and the three document templates in `docs/<feature>/feature-docs/`. Existing files are preserved, so running `new` on an older folder only adds its missing `README.md`. A new scaffold is incomplete: fill it before stamping.
 
 ### `check <repo> [<feature>] [--quiet]`
 
-Check one feature, or every existing feature-docs folder. Reports missing/empty required documents, known unfinished scaffolds, supported structural defects, and recognized missing overview citations. Features with no decisions or tickets may say so explicitly instead of inventing rows.
+Check one feature, or every existing feature-docs folder. Reports missing/empty required documents, known unfinished scaffolds, supported structural defects, recognized missing overview citations, and `LOCAL-ONLY` references in any of the three documents. A local-only reference is a `.scratch/` or `.fleet/` path that is not tracked, or a backticked path that git ignores: a teammate's clone does not have it. The decisions record table may be the current four-column index (`# | Decision | Status | Date`) or the older six-column table. Features with no decisions or tickets may say so explicitly instead of inventing rows.
 
 This is structural validation, not a prose-quality score. Word targets are guidance, not enforced padding or truncation. Quiet mode suppresses successful checks.
 
@@ -72,7 +72,7 @@ bash "$FD" check . csv-export
 bash "$FD" stamp . csv-export --evidence src/api/export.ts --evidence tests/export.test.ts
 ```
 
-Select files supporting documented claims: implementation, relevant tests, and configuration. This inventory does not claim tests ran. Root files such as `package.json`, extensionless files, and paths with spaces can be selected; quote shell arguments containing spaces. Directory citations check existence only, so select important child files individually.
+Select files supporting documented claims: implementation, relevant tests, and configuration. This inventory does not claim tests ran. Evidence must not be ignored by git (`.scratch/` notes and `.fleet/` run records usually are): a teammate's `status` has to be able to check it. The planning source folder is different: it is meant to be local, and `status` on another clone reports `SOURCE MISSING` without failing. Root files such as `package.json`, extensionless files, and paths with spaces can be selected; quote shell arguments containing spaces. Directory citations check existence only, so select important child files individually.
 
 Later stamps reuse the recorded selection when `--evidence` is omitted. Supplying any `--evidence` arguments **replaces the entire selection**; include every file to retain. Files outside that set are not automatically monitored.
 
@@ -151,6 +151,12 @@ The optional Claude Code session hook is in [references/setup.md](./skills/featu
 The [filled example](./skills/feature-docs/references/example.md) illustrates detail level. [Conversion guidance](./skills/feature-docs/references/convert.md) covers older feature/plan/progress documents.
 
 ## Upgrading existing records
+
+### From 2.x to 3.0
+
+Records written before 3.0 often point at `.scratch/` or `.fleet/` files, so `check` and `status` now report `LOCAL-ONLY` and exit 1 for them. `stamp` refuses evidence that git ignores, including a recorded evidence list that contains one; stamp again with a list that leaves it out. To upgrade a feature, run SYNC: replace each local-only pointer with the conclusion it supported, run `new` to add the folder `README.md`, then `check` and `stamp`. Moving to the decision index with sections and adding a glossary is recommended but not required; the older six-column decisions table still passes.
+
+### From unversioned manifests
 
 Unversioned manifests remain readable for source drift and source diffs, including safe legacy source spellings such as `./.scratch/feature`. They lack reviewed code/document baselines, so source matches alone require review. Reading does not rewrite the manifest; migration normalizes the source path.
 

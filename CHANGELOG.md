@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-11-04, 3.0.0: docs a teammate can follow
+
+Docs written from a planning session pointed at `.scratch/` and `.fleet/` files and used question and review numbers (`Q19`, `F7`) that only exist on the author's machine. A colleague with a fresh clone could not follow them. `check` now fails on such references and `stamp` refuses evidence git ignores, so records that passed in 2.x can fail now. That makes this a major version.
+
+- Add: `check`, `status` and `stamp` report `LOCAL-ONLY` for a `.scratch/` or `.fleet/` path that is not tracked, and for a backticked file or folder path that git ignores, in any of the three documents, including the header lines. Tracked files are not reported. A path inside a submodule is judged by the submodule's own ignore rules; commands under `node_modules/` are not reported.
+- Add: `stamp` refuses an `--evidence` file that git ignores, including one in a recorded evidence list.
+- Add: `new` writes a `README.md` in the feature-docs folder that says what each file is for, when to read it, and that people can ignore `sources.json`. Running `new` on an existing folder adds only the missing README.
+- Change: `decisions.md` is an index table (`# | Decision | Status | Date`) followed by one section per decision with Decision, Why, Rejected and Agreed by. The older six-column table still passes `check`, which now finds the Status and Date columns by name.
+- Add: `overview.md` ends with a Glossary of the feature's own terms in the `**Term**:` / `_Avoid_:` format used by Matt Pocock's `CONTEXT.md` and `GLOSSARY.md`. Shared terms are reported as glossary candidates. The section is not required by `check`.
+- Docs: SKILL.md adds "Write for a teammate": cite only files in git, no private IDs, plain attribution with role and date, define the feature's terms, explain settings when first used. The example, source and conversion guides follow it.
+- Docs: the `setup` pointer tells agents to read the overview glossary. USAGE explains how to upgrade 2.x records.
+
 ## 2026-10-27, 2.1.1: script fixes
 
 Bug fixes only, so the version is 2.1.1.

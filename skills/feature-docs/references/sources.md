@@ -16,7 +16,7 @@ Read `docs/agents/issue-tracker.md` for the repository's convention. In the loca
 
 A discovery ticket's `resolved` state establishes only that an answer was recorded. Read the answer behind the map's pointer. A prototype may establish a design trade-off without proving the production implementation or its performance.
 
-Preserve material conclusions in their owning document: rationale in decisions, a current contract in overview, acceptance evidence in tickets. Cite the source and retain enough context to understand the conclusion after `.scratch` disappears. An optional **Discovery outcomes** table in tickets can link important discovery IDs to those records; omit it when it adds no navigation value. Keep only a decision-rich prototype snippet when prose would lose the essential constraint.
+Preserve material conclusions in their owning document: rationale in decisions, a current contract in overview, acceptance evidence in tickets. Attribute it in plain words (who agreed, when) and retain enough context to understand the conclusion without `.scratch`: a teammate's clone never had it. Don't carry over map question numbers, ticket comment positions or review-finding IDs as citations. An optional **Discovery outcomes** table in tickets can link important discovery IDs to those records; omit it when it adds no navigation value. Keep only a decision-rich prototype snippet when prose would lose the essential constraint.
 
 A newly added map, comment or answer is already covered by recursive Markdown source hashing. `stamp` is a baseline, not a guarantee every source claim has been reviewed.
 
@@ -24,7 +24,7 @@ A newly added map, comment or answer is already covered by recursive Markdown so
 
 For a Fleet run, consult `.fleet/runs/<run>/notes.md`, plan decisions, worker reports and the lead's evidence. Prefer actual check output over a summary claim. The lead's acceptance timestamp can establish delivery only for the criteria and scope that were accepted; it does not imply a device, service or production check occurred.
 
-Fleet records outside the configured source directory are not automatically source-hashed. Preserve the material result with its origin/date in the tracked docs. Include a local evidence file explicitly with `--evidence` when continued monitoring of that file is useful.
+Fleet records are local and not source-hashed. Preserve the material result in the tracked docs with its origin in words ("lead's run on 2026-11-03"), not a `.fleet/` path. They cannot be `--evidence`: evidence must be files other clones have.
 
 ## Contradictions and missing history
 

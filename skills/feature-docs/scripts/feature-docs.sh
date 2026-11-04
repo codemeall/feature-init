@@ -7,8 +7,8 @@
 # selected code/test hashes in sources.json. Hash matches are not proof of semantic correctness.
 #
 # Usage:
-#   feature-docs.sh new    <repo> <feature>                    create the folder from the templates
-#   feature-docs.sh check  <repo> [<feature>] [--quiet]        check the three documents
+#   feature-docs.sh new    <repo> <feature>                    create the folder from the templates (adds a missing README.md)
+#   feature-docs.sh check  <repo> [<feature>] [--quiet]        check the three documents, including LOCAL-ONLY paths
 #   feature-docs.sh stamp  <repo> <feature> [--source <dir>] [--evidence <file> ...] [--evidence-only]
 #   feature-docs.sh status <repo> [<feature>] [--quiet]        source/document/evidence drift and remaining work
 #   feature-docs.sh diff   <repo> <feature>                    line-level source changes since the last stamp
@@ -19,6 +19,7 @@
 # <dir> is relative to <repo>; the default is .scratch/<feature>. Sources include *.md files,
 # excluding Git metadata, generated feature-docs folders and docs/FEATURES.md.
 # First stamp needs --evidence files; later stamps reuse the list unless a new list is supplied.
+# Evidence must not be ignored by git: a teammate's clone has to be able to check it.
 # --evidence-only preserves old source hashes/date, or creates a source-free review baseline.
 # stamp acknowledges that the docs were reconciled with the selected files; it never runs tests.
 # Manifests use a strict script-owned JSON layout; externally reformatted JSON is unsupported.
@@ -166,6 +167,73 @@ missing_citations() { # $1 = repo, $2 = overview.md
     done
 }
 
+in_git() { git -C "$1" rev-parse --is-inside-work-tree >/dev/null 2>&1; }
+
+# Prints the repo-relative paths listed in $2 that git ignores. A path inside a submodule is asked
+# of the submodule's own repository: the parent cannot judge it (exit 128).
+ignored_paths() { # $1 = repo, $2 = file with one path per line
+  local repo="$1" list="$2" sub path rc
+  git -C "$repo" ls-files -s 2>/dev/null | awk -F'\t' '$1 ~ /^160000 / { print $2 "/" }' > "$list.subs" || : > "$list.subs"
+  awk 'FILENAME == ARGV[1] { if ($0 != "") s[$0] = 1; next }
+       { for (p in s) if (index($0, p) == 1) next; print }' "$list.subs" "$list" > "$list.parent"
+  # One git call for the parent's paths; one per path only if something still breaks the batch.
+  rc=0; git -C "$repo" check-ignore --stdin < "$list.parent" 2>/dev/null || rc=$?
+  if [[ "$rc" -gt 1 ]]; then
+    while IFS= read -r path; do
+      if git -C "$repo" check-ignore -q -- "$path" 2>/dev/null; then echo "$path"; fi
+    done < "$list.parent"
+  fi
+  while IFS= read -r sub; do
+    [[ -n "$sub" && -d "$repo/$sub" ]] || continue
+    awk -v p="$sub" 'index($0, p) == 1 { print substr($0, length(p) + 1) }' "$list" > "$list.in"
+    [[ -s "$list.in" ]] || continue
+    # An uninitialized submodule answers 128 and is skipped: nothing there can be judged.
+    rc=0; git -C "$repo/$sub" check-ignore --stdin < "$list.in" > "$list.out" 2>/dev/null || rc=$?
+    if [[ "$rc" -le 1 ]]; then awk -v p="$sub" '{ print p $0 }' "$list.out"; fi
+  done < "$list.subs"
+  rm -f "$list.subs" "$list.parent" "$list.in" "$list.out"
+}
+
+# Paths in the three documents that a teammate's clone does not have: the local tracker (.scratch/)
+# and Fleet run records (.fleet/) unless they are tracked, and backticked paths that git ignores.
+# The docs must carry the conclusion itself; a pointer to a file only one machine has is noise.
+local_only_references() { # $1 = repo, $2 = feature docs directory
+  local repo="$1" dir="$2" name path git=0 tmp
+  in_git "$repo" && git=1
+  tmp="$(tmpfile)"
+  for name in overview.md decisions.md tickets.md; do
+    [[ -f "$dir/$name" ]] || continue
+    {
+      # Backticked .scratch/.fleet paths are taken whole (they may contain spaces), then prose ones.
+      {
+        { grep -oE '`(\./)*\.(scratch|fleet)/[^`]*`' "$dir/$name" || true; } \
+          | tr -d '`' | sed -E 's/:[0-9]+(-[0-9]+)?$//; s#^(\./)+##'
+        { sed 's/`[^`]*`//g' "$dir/$name" | grep -oE '(^|[^A-Za-z0-9_-])\.(scratch|fleet)/[^][[:space:]`)|,;:"]*' || true; } \
+          | sed -E 's/^[^.]//; s/\.$//'
+      } | LC_ALL=C sort -u | while IFS= read -r path; do
+        if [[ "$git" -eq 1 && -n "$(git -C "$repo" ls-files -- "$path" 2>/dev/null | head -n 1)" ]]; then continue; fi
+        echo "$path"
+      done
+      if [[ "$git" -eq 1 ]]; then
+        # A file name with an extension (at the root or in a folder) or a folder ending in /.
+        { grep -oE '`[][A-Za-z0-9_.@+/()~-]+(:[0-9]+(-[0-9]+)?)?`' "$dir/$name" || true; } \
+          | tr -d '`' | sed -E 's/:[0-9]+(-[0-9]+)?$//; s#^(\./)+##' | LC_ALL=C sort -u | while IFS= read -r path; do
+            case "$path" in
+              /*|'~'*|.scratch/*|.fleet/*|*..*|*//*|node_modules/*|*/node_modules/*) continue ;;
+              */) ;;
+              */*) case "${path##*/}" in *.*) ;; *) continue ;; esac ;;
+              *.*) ;;
+              *) continue ;;
+            esac
+            echo "$path"
+          done > "$tmp"
+        ignored_paths "$repo" "$tmp"
+      fi
+    } | LC_ALL=C sort -u | sed "s|^|  LOCAL-ONLY  $name: |; s|\$| (not in git: state the conclusion instead)|"
+  done
+  rm -f "$tmp"
+}
+
 # Prose with fenced blocks and inline code removed, so code such as Promise<Feature> is not
 # mistaken for a template marker. No template marker sits inside backticks.
 prose_only() {
@@ -198,7 +266,7 @@ structure_findings() {
     contained_path "$repo" "docs/$slug/feature-docs/$name" || return 2
     grep -q '^# .[^[:space:]]*' "$path" || echo "  INCOMPLETE  $name needs a title"
     # Only known template markers, not arbitrary angle-bracket syntax in real documentation.
-    if prose_only "$path" | grep -Eq '<(Feature|YYYY-MM-DD|title|NN|one sentence|\.scratch/feature|source path|problem|solution|capability|path/file|notes|contracts|verification summary|scope exclusions|ticket links|decision|recorded reason|source>|Accepted,|criterion|ticket|what|blocked|status|date|material conflict)' ||
+    if prose_only "$path" | grep -Eq '<(Feature|YYYY-MM-DD|title|NN|one sentence|\.scratch/feature|source path|problem|solution|capability|path/file|notes|contracts|verification summary|scope exclusions|ticket links|decision|recorded reason|source>|Accepted,|criterion|ticket|what|blocked|status|date|material conflict|one-line|short title|alternative|who agreed|term>|definition>|avoided words)' ||
        grep -Eq '^(Who had the problem and what it was, from their side\.|What the feature does for that person, in one paragraph\.|What is tested, at which seam, and the command that runs it\.|Expand here only the decisions that took real debate:|- \[ \] …)' "$path"; then
       echo "  INCOMPLETE  $name contains unfinished template text"
     fi
@@ -212,24 +280,23 @@ structure_findings() {
   fi
   for name in decisions tickets; do
     [[ -s "$dest/$name.md" ]] || continue
-    if ! awk -F'|' -v kind="$name" '
-      function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
-      /^\|/ {
-        if (trim($2) == "#" && trim($3) == (kind == "decisions" ? "Decision" : "Ticket") &&
-            trim($6) == "Status" && trim($7) == "Date") found = 1
-      }
-      END { exit !found }
-    ' "$dest/$name.md"; then echo "  INCOMPLETE  $name.md needs its record table"; fi
+    # The record table starts with "# | Decision" or "# | Ticket" and has Status and Date columns,
+    # found by name: decisions use a 4-column index (older records have 6 columns).
     awk -F'|' -v kind="$name" '
       function trim(s) { gsub(/^[ \t`*]+|[ \t`*]+$/, "", s); return s }
       /^\|/ {
-        if (trim($2) == "#" && trim($3) == (kind == "decisions" ? "Decision" : "Ticket")) { records = 1; next }
+        if (trim($2) == "#" && trim($3) == (kind == "decisions" ? "Decision" : "Ticket")) {
+          sc = 0; dc = 0
+          for (i = 4; i < NF; i++) { if (trim($i) == "Status") sc = i; if (trim($i) == "Date") dc = i }
+          if (sc && dc) found = 1
+          records = 1; next
+        }
         if (!records || trim($2) ~ /^[-:]+$/) next
         id = trim($2)
         if (id == "" || tolower(id) == "none") next
         if (id in ids) print "  INCOMPLETE  " kind ".md duplicate ID: " id
         ids[id] = 1
-        status = trim($6)
+        status = sc ? trim($sc) : ""
         if (kind == "decisions" && status ~ /^Superseded by D[0-9]+$/) {
           sub(/^Superseded by /, "", status); targets[status] = 1
         }
@@ -237,6 +304,7 @@ structure_findings() {
       }
       { records = 0 }
       END {
+        if (!found) print "  INCOMPLETE  " kind ".md needs its record table"
         for (target in targets) if (!(target in ids))
           print "  INCOMPLETE  decisions.md supersession target is missing: " target
       }
@@ -247,6 +315,7 @@ structure_findings() {
   fi
   missing="$(missing_citations "$repo" "$dest/overview.md")" || return 2
   if [[ -n "$missing" ]]; then printf '%s\n' "$missing" | sed 's/^/  MISSING CITATION  /'; fi
+  local_only_references "$repo" "$dest" || return 2
 }
 
 # Rewrites docs/FEATURES.md from every feature's overview.md.
@@ -291,7 +360,7 @@ cmd_new() {
   if [[ -e "$repo/docs/$slug" || -L "$repo/docs/$slug" ]]; then contained_path "$repo" "docs/$slug" || die "cannot use docs/$slug"; fi
   if [[ -e "$dest" || -L "$dest" ]]; then contained_path "$repo" "docs/$slug/feature-docs" || die "cannot use docs/$slug/feature-docs"; fi
   mkdir -p "$dest"
-  for name in overview.md decisions.md tickets.md; do
+  for name in README.md overview.md decisions.md tickets.md; do
     [[ ! -L "$dest/$name" ]] || die "refusing to write through a symlink: docs/$slug/feature-docs/$name"
     if [[ -f "$dest/$name" ]]; then echo "skip     docs/$slug/feature-docs/$name (already exists)"; continue; fi
     sed -e "s/<Feature>/$title/g" -e "s/<YYYY-MM-DD>/$TODAY/g" "$TPL_DIR/$name" > "$dest/$name"
@@ -367,6 +436,12 @@ cmd_stamp() {
     contained_path "$repo" "$path" || die "evidence file is missing: $path"
     [[ -f "$repo/$path" ]] || die "evidence must be a regular file, not a directory: $path"
     [[ ! "$repo/$path" -ef "$manifest" ]] || die "sources.json cannot be its own evidence"
+    if in_git "$repo"; then
+      printf '%s\n' "$path" > "$WORK/ignore-check"
+      if [[ -n "$(ignored_paths "$repo" "$WORK/ignore-check")" ]]; then
+        die "evidence is ignored by git, so other clones cannot check it: $path (stamp again with an --evidence list that leaves it out)"
+      fi
+    fi
     digest="$(hash_file "$repo/$path")" || die "cannot hash evidence: $path"
     printf '%s\t%s\n' "$path" "$digest" >> "$WORK/evidence"
   done < "$WORK/paths"
@@ -642,7 +717,7 @@ cmd_setup() {
     cat <<'EOF'
 ## Feature docs
 
-Features are recorded in `docs/<feature>/feature-docs/`; `docs/FEATURES.md` lists them. Read the overview for context, then decisions before speccing, ticketing or changing behavior. Cite the decision IDs the change builds on or overturns. Read tickets for acceptance evidence and remaining gaps. Write, convert and sync these docs with the `feature-docs` skill.
+Features are recorded in `docs/<feature>/feature-docs/`; `docs/FEATURES.md` lists them. Read the overview for context and the feature's own terms (its Glossary section), then decisions before speccing, ticketing or changing behavior. Cite the decision IDs the change builds on or overturns. Read tickets for acceptance evidence and remaining gaps. Write, convert and sync these docs with the `feature-docs` skill.
 EOF
   } >> "$target"
   echo "added    Feature docs section to $file"
