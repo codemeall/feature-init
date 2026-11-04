@@ -11,11 +11,12 @@ Write into `docs/<feature>/feature-docs/` beside existing `feature.md`, `plan.md
 | `feature.md` Why, What, Users | Overview Problem and Solution |
 | Scope/MVP rows | Overview capabilities supported by inspected code; ticket criteria for remaining work |
 | Fast-follow/Not doing | Tickets when still committed; decisions when explicitly excluded, with overview links |
-| Decisions | Decisions table, retaining IDs, recorded rationale and Accepted/Proposed state |
+| Decisions | Decision index and sections, retaining IDs, recorded rationale and Accepted/Proposed state |
 | Acceptance criteria | Tickets, assessed independently of old checkbox state |
 | `plan.md` Contracts | Overview contracts, distinguishing current implementation from accepted intent |
 | Milestones | Ticket rows retaining IDs such as M1 or M3.1 |
 | Risks | Decisions only when a risk informed a significant choice |
+| Glossary or terminology notes | Overview glossary for feature-only terms; repo glossary candidates for shared ones |
 | `progress.md` Findings | Their owning file, with the appropriate evidence and provenance |
 | Done/Left, sign-offs | Ticket evidence or gaps; status follows the criteria, not the old heading |
 | Verification notes | Dated ticket evidence, attributed and marked not rerun unless repeated now |
@@ -33,6 +34,6 @@ When sources disagree, distinguish the implementation claim from the intent or v
 ## Finishing
 
 - Convert code citations to verified repository-relative paths, including package prefixes.
-- Name the original paths and conversion date on the overview's Source line. These references identify provenance; keep the actual material conclusion in the tracked record.
+- Name the original paths and conversion date on the overview's Source line; describe originals that are not in git in words. These references identify provenance; keep the actual material conclusion in the tracked record.
 - Run `check`. Stamp with explicit evidence files and `--source <dir>` for a continuing local source folder, or `--evidence-only` without one. On a first stamp, the latter creates a source-null manifest; an existing source baseline is preserved instead.
 - Report agent instructions pointing at originals so they can be repointed. Leave originals intact unless removal is authorized.

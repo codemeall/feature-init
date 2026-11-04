@@ -36,13 +36,16 @@ That workflow leaves five gaps, and each one is a reason the skill exists:
 docs/
 ├── FEATURES.md                 one line per documented feature (generated)
 └── csv-export/feature-docs/
-    ├── overview.md             summary, problem, solution, what was built (with file citations), testing, out of scope
-    ├── decisions.md            every significant choice: why, alternative rejected, source, status, date
+    ├── README.md               what each file is for and when to read it (written by the script)
+    ├── overview.md             summary, problem, solution, what was built (with file citations), testing, out of scope, glossary
+    ├── decisions.md            an index table, then one section per choice: decision, why, alternative rejected, who agreed
     ├── tickets.md              delivery states, acceptance criteria, and evidence
-    └── sources.json            source, document, and selected evidence hashes (written by the script)
+    └── sources.json            source, document, and selected evidence hashes (written by the script; people can ignore it)
 ```
 
 A filled example of all three docs: [`skills/feature-docs/references/example.md`](./skills/feature-docs/references/example.md).
+
+The docs are written for a teammate with a fresh clone. They never point at `.scratch/`, `.fleet/` or other files outside git (`check` reports these as `LOCAL-ONLY`). They attribute decisions in plain words instead of private question or review numbers. They define the feature's own terms in a glossary in the same `**Term**:` / `_Avoid_:` format as Matt Pocock's `CONTEXT.md` and `GLOSSARY.md`.
 
 ## The four use cases
 
@@ -196,6 +199,7 @@ The instructions are in [`skills/feature-docs/SKILL.md`](./skills/feature-docs/S
 - Cite implementation paths from the repo root and explicitly select reviewed files with `--evidence`. Later stamps reuse that selection; a supplied list replaces it.
 - Rows in `decisions.md` and `tickets.md` are superseded or withdrawn, never deleted.
 - Use the repo's glossary terms, cite an ADR instead of restating it, and name glossary and ADR candidates in your report.
+- Write for a fresh clone: cite only files in git, attribute decisions in plain words, and define the feature's own terms in the overview glossary.
 
 ## Repo layout
 
